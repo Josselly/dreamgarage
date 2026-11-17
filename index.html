@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="Explore and customize an original 3D sports car.">
+<title>3D Car Studio</title>
+<style>
+:root{color-scheme:dark;--ink:#f8f6ef;--muted:#a9b2bb;--accent:#eaff8f;--line:#303941}
+*{box-sizing:border-box}
+body{margin:0;background:#10161b;color:var(--ink);font:15px/1.5 system-ui,sans-serif}
+main{width:min(1340px,100%);margin:auto;padding:28px clamp(18px,4vw,60px) 30px}
+header{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding-bottom:17px}
+header strong{letter-spacing:.13em;text-transform:uppercase;font-size:12px}
+header span,.model{color:var(--muted);font-size:12px;letter-spacing:.13em;text-transform:uppercase}
+h1{margin:9px 0 0;font-size:clamp(48px,8vw,106px);line-height:.96;letter-spacing:-.085em;font-weight:760}
+.model{margin:12px 0 20px}
+.studio{border:1px solid var(--line);background:#171e24;border-radius:12px;overflow:hidden}
+.viewport{position:relative;background:radial-gradient(ellipse at 49% 44%,#384750,#222d36 55%,#171e24 100%)}
+canvas{display:block;width:100%;height:clamp(330px,51vh,580px);touch-action:none;cursor:grab;outline-offset:-4px}
+canvas:active{cursor:grabbing}
+.hint{position:absolute;bottom:13px;left:17px;color:#c2cbd0;font-size:12px;margin:0;pointer-events:none}
+.controls{display:flex;flex-wrap:wrap;gap:14px 30px;align-items:center;justify-content:space-between;padding:16px;border-top:1px solid var(--line)}
+.paint,.camera{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+#paint-name{flex-basis:100%;color:var(--muted);font-size:13px;margin:0;min-height:20px}
+button{border:1px solid #4d5962;background:#202930;color:inherit;border-radius:7px;min-width:44px;min-height:44px;font:inherit;padding:0 12px;cursor:pointer}
+button:hover{border-color:var(--accent)}
+button:focus-visible,canvas:focus-visible{outline:2px solid var(--accent)}
+button.swatch{width:44px;padding:7px;display:grid;place-items:center}
+.swatch::before{content:'';width:24px;height:24px;background:var(--paint);border-radius:50%;border:1px solid #ffffff66}
+button[aria-pressed=true]{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+@media(max-width:570px){main{padding-top:17px}.controls{gap:12px;padding:12px}.camera{width:100%}.hint{left:12px}canvas{height:355px}}
+</style>
+</head>
+<body>
+<main>
+<header><strong>3D Car Studio</strong><span>Virtual showroom</span></header>
+<h1>Form GT</h1>
+<p class="model">Original sports car concept</p>
+<section class="studio" aria-label="Car configurator">
+<div class="viewport">
+<canvas id="view" tabindex="0" aria-label="Interactive 3D sports car. Arrow keys rotate, plus and minus zoom, Home resets." aria-describedby="hint">This showroom requires a browser with Canvas support.</canvas>
+<p class="hint" id="hint">Drag to rotate · Scroll or pinch to zoom</p>
+</div>
+<div class="controls">
+<div class="paint" role="group" aria-label="Paint color">
+<p id="paint-name" aria-live="polite">Paint · Signal Orange</p>
+<button class="swatch" style="--paint:#ef693c" data-paint="239,105,60" aria-label="Signal Orange" title="Signal Orange" aria-pressed="true"></button>
+<button class="swatch" style="--paint:#5a9eff" data-paint="90,158,255" aria-label="Glacier Blue" title="Glacier Blue" aria-pressed="false"></button>
+<button class="swatch" style="--paint:#a7cd69" data-paint="167,205,105" aria-label="Circuit Green" title="Circuit Green" aria-pressed="false"></button>
+<button class="swatch" style="--paint:#e4e0da" data-paint="228,224,218" aria-label="Pearl Silver" title="Pearl Silver" aria-pressed="false"></button>
+</div>
+<div class="camera" role="group" aria-label="Camera controls">
+<button id="left" aria-label="Rotate left">←</button>
+<button id="right" aria-label="Rotate right">→</button>
+<button id="out" aria-label="Zoom out">−</button>
+<button id="in" aria-label="Zoom in">+</button>
+<button id="reset">Reset view</button>
+</div>
+</div>
+</section>
+</main>
+<script>
+const canvas = document.querySelector('#view');
+const ctx = canvas.getContext('2d');
+const faces = [];
+let paint = [239,105,60];
+let yaw = 0.58, pitch = 0.34, zoom = 1;
+const add = (points, color, fixed = false) => faces.push({points, color, fixed});
+
+function body(sections, materials) {
+  const rings = sections.map(([x,w,b,t]) => [
+    [x,b,-w*.82],[x,b,w*.82],[x,b+.23,w],[x,t-.13,w],[x,t,w*.74],
+    [x,t,-w*.74],[x,t-.13,-w],[x,b+.23,-w]
+  ]);
+  for (let i=1;i<rings.length;i++) {
+    for (let j=0;j<8;j++) {
+      const k=(j+1)%8;
+      add([rings[i-1][j],rings[i-1][k],rings[i][k],rings[i][j]],materials[j]);
+    }
+  }
+  add(rings[0],[42,45,49]);
+  add(rings.at(-1),null);
+}
+
+body([
+  [-2.55,.89,.42,.82],[-2.28,1.04,.36,.95],[-1.55,1.11,.31,1.04],
+  [-.82,1.04,.33,1.09],[.62,1.03,.33,1.02],
+  [1.48,1.11,.34,.99],[2.22,1.07,.39,.92],[2.54,.91,.47,.73]
+],[[37,40,43],null,null,null,null,null,null,null]);
+
+// Cabin glass and painted roof.
+const glass=[53,76,89], sideGlass=[38,57,69];
+const cabinBase=[[-1.55,1.008,-.78],[-1.55,1.008,.78],[1.2,1.01,.78],[1.2,1.01,-.78]];
+const roof=[[-.76,1.53,-.56],[-.76,1.53,.56],[.46,1.67,.59],[.46,1.67,-.59]];
+add(roof,null);
+for(let i=0;i<4;i++){
+  const j=(i+1)%4;
+  add([cabinBase[i],cabinBase[j],roof[j],roof[i]],i%2===0?glass:sideGlass);
+}
+for(const s of [-1,1]){
+  add([[.18,1.015,s*.785],[.24,1.015,s*.785],[-.03,1.604,s*.584],[-.105,1.602,s*.584]],[22,27,32]);
+  add([[1.66,.98,s*.96],[2.33,.865,s*.92],[2.525,.739,s*.76],[2.44,.779,s*.65],[1.91,.945,s*.76]],[214,247,255],true);
+  add([[-2.56,.8,s*.37],[-2.56,.8,s*.77],[-2.56,.718,s*.82],[-2.56,.715,s*.37]],[241,47,66],true);
+}
+add([[2.546,.64,-.64],[2.546,.64,.64],[2.546,.5,.68],[2.546,.5,-.68]],[19,24,28],true);
+
+function wheel(x,s) {
+  function ring(r,z){
+    return Array.from({length:32},(_,i)=>{
+      const a=i*Math.PI/16;
+      return [x+Math.cos(a)*r,.51+Math.sin(a)*r,z*s];
+    });
+  }
+  const bands=[[.38,.87],[.48,.91],[.5,1.055],[.46,1.19],[.35,1.2],[.30,1.207]];
+  const rings=bands.map(([r,z])=>ring(r,z));
+  for(let j=1;j<rings.length;j++){
+    for(let i=0;i<32;i++){
+      const k=(i+1)%32;
+      add([rings[j-1][i],rings[j-1][k],rings[j][k],rings[j][i]],j===5?[123,138,147]:[29,32,37]);
+    }
+  }
+  add(ring(.305,1.211),[30,36,43],true);
+  for(let i=0;i<10;i++){
+    const a=i*Math.PI/5;
+    const point=(r,d)=>[x+Math.cos(a+d)*r,.51+Math.sin(a+d)*r,s*1.219];
+    add([point(.055,-.37),point(.29,-.1),point(.29,.09),point(.055,.38)],[163,177,184],true);
+  }
+  add(ring(.082,1.223),[101,112,121],true);
+}
+for(const x of [-1.58,1.54]) for(const s of [-1,1]) wheel(x,s);
+
+function draw(){
+  const w=canvas.clientWidth,h=canvas.clientHeight;
+  const dpr=Math.min(devicePixelRatio,2);
+  if(canvas.width!==Math.round(w*dpr)||canvas.height!==Math.round(h*dpr)){
+    canvas.width=Math.round(w*dpr);
+    canvas.height=Math.round(h*dpr);
+  }
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,w,h);
+  const size=Math.min(w/6.35,h/3.6)*zoom;
+  const cy=Math.cos(yaw),sy=Math.sin(yaw),cp=Math.cos(pitch),sp=Math.sin(pitch);
+  function project([x,y,z]){
+    const across=x*cy-z*sy;
+    const depth=x*sy+z*cy;
+    return [w*.5+across*size,h*.52-(y-.73)*cp*size+depth*sp*size,depth*cp+(y-.73)*sp];
+  }
+  function polygon(points,fill){
+    ctx.beginPath();
+    points.forEach(([x,y],i)=>i?ctx.lineTo(x,y):ctx.moveTo(x,y));
+    ctx.closePath();
+    ctx.fillStyle=fill;
+    ctx.fill();
+  }
+  const grid=(a,b)=>{
+    const [x,y]=project(a),[u,v]=project(b);
+    ctx.moveTo(x,y);
+    ctx.lineTo(u,v);
+  };
+  ctx.beginPath();
+  for(let i=-6;i<=6;i++){
+    grid([i,0,-6],[i,0,6]);
+    grid([-6,0,i],[6,0,i]);
+  }
+  ctx.strokeStyle='#90adbc22';
+  ctx.stroke();
+  for(let i=9;i>=0;i--){
+    const radius=1+i*.035;
+    const shadow=Array.from({length:48},(_,j)=>{
+      const a=j*Math.PI/24;
+      return project([Math.cos(a)*2.55*radius,.006,Math.sin(a)*1.18*radius]);
+    });
+    polygon(shadow,'rgba(4,8,11,.10)');
+  }
+  const ordered=faces.map(face=>{
+    const points=face.points.map(project);
+    const depth=points.reduce((sum,p)=>sum+p[2],0)/points.length;
+    return {...face,points,depth,world:face.points};
+  }).sort((a,b)=>a.depth-b.depth);
+  for(const face of ordered){
+    const [a,b,c]=face.world;
+    const u=b.map((v,i)=>v-a[i]),v=c.map((n,i)=>n-a[i]);
+    const n=[u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]];
+    const length=Math.hypot(...n)||1;
+    const light=face.fixed?1:.64+.42*Math.abs((n[0]*.28+n[1]*.89+n[2]*.34)/length);
+    const rgb=(face.color||paint).map(value=>Math.min(255,Math.round(value*light)));
+    polygon(face.points,'rgb('+rgb.join(',')+')');
+  }
+}
+let frame;
+function render(){
+  if(frame) return;
+  frame=requestAnimationFrame(()=>{frame=0;draw();});
+}
+const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
+function rotate(dx,dy=0){yaw+=dx;pitch=clamp(pitch+dy,.12,1.19);render();}
+function magnify(factor){zoom=clamp(zoom*factor,.65,1.85);render();}
+function reset(){yaw=.58;pitch=.34;zoom=1;render();}
+const pointers=new Map();
+const span=()=>{const [a,b]=pointers.values();return Math.hypot(a.x-b.x,a.y-b.y);};
+canvas.addEventListener('pointerdown',event=>{
+  if(event.button!==0) return;
+  canvas.setPointerCapture(event.pointerId);
+  pointers.set(event.pointerId,{x:event.clientX,y:event.clientY});
+});
+canvas.addEventListener('pointermove',event=>{
+  const previous=pointers.get(event.pointerId);
+  if(!previous) return;
+  const oldSpan=pointers.size===2?span():0;
+  pointers.set(event.pointerId,{x:event.clientX,y:event.clientY});
+  if(pointers.size===1) rotate((event.clientX-previous.x)*.009,(event.clientY-previous.y)*.007);
+  if(oldSpan>0) magnify(span()/oldSpan);
+});
+for(const type of ['pointerup','pointercancel','lostpointercapture']){
+  canvas.addEventListener(type,event=>pointers.delete(event.pointerId));
+}
+canvas.addEventListener('wheel',event=>{
+  event.preventDefault();
+  magnify(Math.exp(-event.deltaY*(event.deltaMode===1?.028:.0014)));
+},{passive:false});
+const actions={
+  ArrowLeft:()=>rotate(-.23),ArrowRight:()=>rotate(.23),
+  ArrowUp:()=>rotate(0,.12),ArrowDown:()=>rotate(0,-.12),
+  '+':()=>magnify(1.16),'=':()=>magnify(1.16),'-':()=>magnify(1/1.16),Home:reset
+};
+canvas.addEventListener('keydown',event=>{
+  if(!Object.hasOwn(actions,event.key)) return;
+  event.preventDefault();
+  actions[event.key]();
+});
+for(const [id,key] of Object.entries({left:'ArrowLeft',right:'ArrowRight',out:'-',in:'+',reset:'Home'})){
+  document.getElementById(id).addEventListener('click',actions[key]);
+}
+const swatches=document.querySelectorAll('.swatch');
+for(const swatch of swatches){
+  swatch.addEventListener('click',()=>{
+    paint=swatch.dataset.paint.split(',').map(Number);
+    for(const button of swatches) button.setAttribute('aria-pressed',button===swatch);
+    document.getElementById('paint-name').textContent='Paint · '+swatch.getAttribute('aria-label');
+    render();
+  });
+}
+new ResizeObserver(render).observe(canvas);
+render();
+</script>
+</body>
+</html>
