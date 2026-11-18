@@ -440,7 +440,10 @@ const speedLabel=document.getElementById('race-speed');
 const lapLength=900;
 const finish=lapLength*2;
 const raceCarWidth=.42;
-const raceCarLength=7;
+const laneLimit=1-raceCarWidth/2;
+const crashWidth=.32;
+const crashLength=2.4;
+const passingLanes=[-.66,0,.66];
 const placements=['1st','2nd','3rd','4th'];
 const keyDirections={
   ArrowLeft:'left',ArrowRight:'right',ArrowUp:'up',ArrowDown:'down',
@@ -449,9 +452,9 @@ const keyDirections={
 const heldKeys=new Set(), heldPointers=new Map();
 const player={distance:0,lane:0,speed:0};
 const opponents=[
-  {start:12,lane:-.58,speed:43,color:'#4174b4'},
-  {start:20,lane:.58,speed:47,color:'#d8c374'},
-  {start:30,lane:.14,speed:50,color:'#83919b'}
+  {start:12,startLane:-.66,pace:46,color:'#4174b4'},
+  {start:20,startLane:.66,pace:49,color:'#d8c374'},
+  {start:30,startLane:0,pace:51,color:'#83919b'}
 ];
 const sky=road.createLinearGradient(0,0,0,160);
 sky.addColorStop(0,'#467b9b');
@@ -557,6 +560,10 @@ function resetRace(){
   Object.assign(player,{distance:0,lane:0,speed:0});
   for(const car of opponents){
     car.distance=car.start;
+    car.lane=car.startLane;
+    car.targetLane=car.startLane;
+    car.speed=car.pace;
+    car.nextDecision=0;
     car.finished=false;
   }
   raceTime=0;
@@ -573,6 +580,31 @@ function endRace(message){
   raceButton.focus();
 }
 
+function moveRival(rival,index,step){
+  if(rival.finished) return;
+  const nearby=[player,...opponents.filter(car=>car!==rival&&!car.finished)];
+  const ahead=nearby.find(car=>car.distance>rival.distance
+    && car.distance-rival.distance<18
+    && Math.abs(car.lane-rival.lane)<.43);
+  if(raceTime>=rival.nextDecision){
+    const choices=passingLanes.filter(lane=>lane!==rival.targetLane
+      && nearby.every(car=>Math.abs(car.distance-rival.distance)>12
+        || Math.abs(car.lane-lane)>.53));
+    if(choices.length && (ahead || raceTime>2)){
+      rival.targetLane=choices[Math.floor(Math.random()*choices.length)];
+    }
+    rival.nextDecision=raceTime+1.2+index*.33+Math.random();
+  }
+  const inside=nearby.every(car=>Math.abs(car.distance-rival.distance)>5.5
+    || Math.abs(car.lane-rival.lane)>.38
+    || Math.abs(car.lane-rival.targetLane)>=Math.abs(car.lane-rival.lane));
+  if(inside) rival.lane+=clamp(rival.targetLane-rival.lane,-step*.5,step*.5);
+  const targetSpeed=ahead?Math.min(rival.pace,ahead.speed*.92):rival.pace+3*Math.sin(raceTime*.8+index);
+  rival.speed+=clamp(targetSpeed-rival.speed,-step*16,step*8);
+  rival.distance+=rival.speed*step;
+  rival.finished=rival.distance>=finish;
+}
+
 function tickRace(time){
   if(!running) return;
   const step=clamp((time-lastTime)/1000,0,.05);
@@ -581,22 +613,16 @@ function tickRace(time){
   const directions=new Set([...heldKeys].map(key=>keyDirections[key]));
   for(const direction of heldPointers.values()) directions.add(direction);
   const steer=Number(directions.has('right'))-Number(directions.has('left'));
-  const offTrack=Math.abs(player.lane)>.98;
   const acceleration=directions.has('down')?-40:directions.has('up')?19:-8;
-  player.speed=clamp(player.speed+(acceleration-(offTrack?18:0))*step,0,69);
-  player.lane=clamp(player.lane+steer*step*(.65+player.speed*.018),-1.42,1.42);
-  for(const car of opponents){
-    if(!car.finished){
-      car.distance+=car.speed*step;
-      car.finished=car.distance>=finish;
-    }
-  }
+  player.speed=clamp(player.speed+acceleration*step,0,69);
+  player.lane=clamp(player.lane+steer*step*(.65+player.speed*.018),-laneLimit,laneLimit);
+  opponents.forEach((rival,index)=>moveRival(rival,index,step));
   player.distance=Math.min(finish,player.distance+player.speed*step);
   const place=updateRace();
   drawRace();
   const crashed=opponents.some(car=>!car.finished
-    && Math.abs(car.distance-player.distance)<=raceCarLength
-    && Math.abs(car.lane-player.lane)<=raceCarWidth);
+    && Math.abs(car.distance-player.distance)<=crashLength
+    && Math.abs(car.lane-player.lane)<=crashWidth);
   if(crashed){
     endRace('Crash! Your car touched a rival. Choose Race again to restart.');
   }else if(player.distance>=finish){
@@ -623,7 +649,7 @@ raceButton.addEventListener('click',()=>{
   running=true;
   lastTime=performance.now();
   raceButton.textContent='Restart';
-  driveStatus.textContent='Hold accelerate. Stay on the track and steer around the other cars.';
+  driveStatus.textContent='Hold accelerate and look for gaps as rivals change lanes and pass.';
   driveFrame=requestAnimationFrame(tickRace);
 });
 game.addEventListener('close',()=>{
