@@ -16,7 +16,7 @@ header span,.model{color:var(--muted);font-size:12px;letter-spacing:.13em;text-t
 h1{margin:9px 0 0;font-size:clamp(48px,8vw,106px);line-height:.96;letter-spacing:-.085em;font-weight:760}
 .model{margin:12px 0 20px}
 .studio{border:1px solid var(--line);background:#171e24;border-radius:12px;overflow:hidden}
-.viewport{position:relative;background:radial-gradient(ellipse at 49% 44%,#384750,#222d36 55%,#171e24 100%)}
+.viewport{position:relative;background:radial-gradient(ellipse at 46% 37%,#464b50,#30363b 53%,#22272b 100%)}
 canvas{display:block;width:100%;height:clamp(330px,51vh,580px);touch-action:none;cursor:grab;outline-offset:-4px}
 canvas:active{cursor:grabbing}
 .hotspots{position:absolute;inset:0;pointer-events:none;overflow:hidden}
@@ -301,12 +301,17 @@ function draw(){
     const depth=x*sy+z*cy;
     return [w*.5+across*size,h*.52-(y-.73)*cp*size+depth*sp*size,depth*cp+(y-.73)*sp];
   }
-  function polygon(points,fill){
+  function polygon(points,fill,sealEdges=false){
     ctx.beginPath();
     points.forEach(([x,y],i)=>i?ctx.lineTo(x,y):ctx.moveTo(x,y));
     ctx.closePath();
     ctx.fillStyle=fill;
     ctx.fill();
+    if(sealEdges){
+      ctx.strokeStyle=fill;
+      ctx.lineWidth=.65;
+      ctx.stroke();
+    }
   }
   const grid=(a,b)=>{
     const [x,y]=project(a),[u,v]=project(b);
@@ -318,7 +323,7 @@ function draw(){
     grid([i,0,-6],[i,0,6]);
     grid([-6,0,i],[6,0,i]);
   }
-  ctx.strokeStyle='#90adbc22';
+  ctx.strokeStyle='#bac3c413';
   ctx.stroke();
   for(let i=9;i>=0;i--){
     const radius=1+i*.035;
@@ -352,25 +357,29 @@ function draw(){
     const n=[u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]];
     const length=Math.hypot(...n)||1;
     const facing=Math.abs((n[0]*.28+n[1]*.89+n[2]*.34)/length);
-    const light=face.fixed?1:.55+.48*facing;
+    const light=face.fixed?1:.67+.31*facing;
 
     const color=face.feature==='headlight' && !headlightsOn ? [81,100,111] : face.color||paint;
     if(face.feature==='headlight' && headlightsOn){
-      ctx.shadowBlur=14;
-      ctx.shadowColor='#a2e9ff';
+      ctx.shadowBlur=5;
+      ctx.shadowColor='#ddedfa88';
     }
-    const rgb=color.map(value=>Math.min(255,Math.round(value*light)));
+    const brightness=(color[0]+color[1]+color[2])/3;
+    const rgb=color.map(value=>{
+      const toned=face.color?value:value*.89+brightness*.11;
+      return Math.min(255,Math.round(toned*light));
+    });
     let fill='rgb('+rgb.join(',')+')';
     if(!face.color && facing>.4){
       const top=Math.min(...face.points.map(point=>point[1]));
       const bottom=Math.max(...face.points.map(point=>point[1]));
       if(bottom-top>2){
         fill=ctx.createLinearGradient(0,top,0,bottom);
-        fill.addColorStop(0,'rgb('+rgb.map(channel=>Math.round(channel*.82+41)).join(',')+')');
-        fill.addColorStop(1,'rgb('+rgb.map(channel=>Math.round(channel*.86)).join(',')+')');
+        fill.addColorStop(0,'rgb('+rgb.map(channel=>Math.round(channel*.91+20)).join(',')+')');
+        fill.addColorStop(1,'rgb('+rgb.map(channel=>Math.round(channel*.94)).join(',')+')');
       }
     }
-    polygon(face.points,fill);
+    polygon(face.points,fill,!face.color);
     ctx.shadowBlur=0;
   }
   const side=cy>=0?1:-1;
