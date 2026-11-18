@@ -25,7 +25,10 @@ canvas:active{cursor:grabbing}
 .part-info strong{color:var(--ink);margin-right:8px}
 .hint{position:absolute;bottom:13px;left:17px;color:#c2cbd0;font-size:12px;margin:0;pointer-events:none}
 .controls{display:flex;flex-wrap:wrap;gap:14px 30px;align-items:center;justify-content:space-between;padding:16px;border-top:1px solid var(--line)}
-.paint,.camera,.features{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+.paint,.camera,.features,.car-picker{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+.car-picker{display:flex;align-items:center;gap:10px;margin:0 0 18px;color:var(--muted)}
+select,input[type=color]{font:inherit;color:var(--ink);background:#202930;border:1px solid #4d5962;border-radius:7px;min-height:44px;padding:0 9px}
+input[type=color]{width:44px;padding:5px;cursor:pointer}
 #paint-name{flex-basis:100%;color:var(--muted);font-size:13px;margin:0;min-height:20px}
 button{border:1px solid #4d5962;background:#202930;color:inherit;border-radius:7px;min-width:44px;min-height:44px;font:inherit;padding:0 12px;cursor:pointer}
 button:hover{border-color:var(--accent)}
@@ -39,8 +42,15 @@ button[aria-pressed=true]{border-color:var(--accent);box-shadow:inset 0 0 0 1px 
 <body>
 <main>
 <header><strong>3D Car Studio</strong><span>Virtual showroom</span></header>
-<h1>Form GT</h1>
-<p class="model">Original sports car concept</p>
+<h1 id="car-name">Form GT</h1>
+<p class="model" id="car-description">Porsche-inspired sports coupe</p>
+<label class="car-picker">Choose a car
+<select id="car-select">
+<option value="coupe">Form GT · Porsche-inspired</option>
+<option value="sedan">Form RS · BMW-inspired</option>
+<option value="hatch">Form R · Honda-inspired</option>
+</select>
+</label>
 <section class="studio" aria-label="Car configurator">
 <div class="viewport">
 <canvas id="view" tabindex="0" aria-label="Interactive 3D sports car. Arrow keys rotate, plus and minus zoom, Home resets." aria-describedby="hint">This showroom requires a browser with Canvas support.</canvas>
@@ -60,6 +70,7 @@ button[aria-pressed=true]{border-color:var(--accent);box-shadow:inset 0 0 0 1px 
 <button class="swatch" style="--paint:#5a9eff" data-paint="90,158,255" aria-label="Glacier Blue" title="Glacier Blue" aria-pressed="false"></button>
 <button class="swatch" style="--paint:#a7cd69" data-paint="167,205,105" aria-label="Circuit Green" title="Circuit Green" aria-pressed="false"></button>
 <button class="swatch" style="--paint:#e4e0da" data-paint="228,224,218" aria-label="Pearl Silver" title="Pearl Silver" aria-pressed="false"></button>
+<input id="custom-paint" type="color" value="#ef693c" aria-label="Choose a custom paint color" title="Custom paint color">
 </div>
 <div class="camera" role="group" aria-label="Camera controls">
 <button id="left" aria-label="Rotate left">←</button>
@@ -69,8 +80,6 @@ button[aria-pressed=true]{border-color:var(--accent);box-shadow:inset 0 0 0 1px 
 <button id="reset">Reset view</button>
 </div>
 <div class="features" role="group" aria-label="Car features and preset views">
-<button id="lights" aria-pressed="true">Headlights</button>
-<button id="doors" aria-pressed="false">Open doors</button>
 <button data-view="front">Front</button>
 <button data-view="side">Side</button>
 <button data-view="rear">Rear</button>
@@ -85,6 +94,16 @@ const faces = [];
 let paint = [239,105,60];
 let yaw = 0.58, pitch = 0.34, zoom = 1;
 let headlightsOn = true, doorsOpen = false, hoodOpen = false;
+const profiles={
+  coupe:{name:'Form GT',description:'Porsche-inspired sports coupe',length:1,width:1,roof:0,rear:0},
+  sedan:{name:'Form RS',description:'BMW-inspired sport sedan',length:1.12,width:1.015,roof:.25,rear:.3},
+  hatch:{name:'Form R',description:'Honda-inspired hot hatch',length:.91,width:.95,roof:.34,rear:.7}
+};
+let car=profiles.coupe;
+function shape([x,y,z]){
+  const cabin=Math.max(0,(y-1.02)/.65);
+  return [x*car.length-car.rear*cabin*.65, y+cabin*car.roof, z*car.width];
+}
 const hotspots = [...document.querySelectorAll('[data-part]')];
 const add = (points, color, fixed = false, feature = '') => faces.push({points, color, fixed, feature});
 
@@ -225,7 +244,7 @@ function draw(){
     let world=face.points;
     if(doorsOpen && typeof face.feature==='number') world=world.map(point=>doorPoint(point,face.feature));
     if(hoodOpen && face.feature==='hood') world=world.map(hoodPoint);
-    const points=world.map(project);
+    const points=world.map(point=>project(shape(point)));
     const depth=points.reduce((sum,p)=>sum+p[2],0)/points.length;
     return {...face,points,depth,world};
   }).sort((a,b)=>a.depth-b.depth);
@@ -253,7 +272,7 @@ function draw(){
   };
   const placed=[];
   for(const button of hotspots){
-    const [x,y]=project(parts[button.dataset.part]);
+    const [x,y]=project(shape(parts[button.dataset.part]));
     const left=clamp(x,37,w-37);
     const top=clamp(y,26,h-53);
     const moved=placed.some(point=>Math.abs(point[0]-left)<74 && Math.abs(point[1]-top)<46);
@@ -307,19 +326,6 @@ canvas.addEventListener('keydown',event=>{
 for(const [id,key] of Object.entries({left:'ArrowLeft',right:'ArrowRight',out:'-',in:'+',reset:'Home'})){
   document.getElementById(id).addEventListener('click',actions[key]);
 }
-const lightsButton=document.getElementById('lights');
-lightsButton.addEventListener('click',()=>{
-  headlightsOn=!headlightsOn;
-  lightsButton.setAttribute('aria-pressed',headlightsOn);
-  render();
-});
-const doorsButton=document.getElementById('doors');
-doorsButton.addEventListener('click',()=>{
-  doorsOpen=!doorsOpen;
-  doorsButton.setAttribute('aria-pressed',doorsOpen);
-  doorsButton.textContent=doorsOpen?'Close doors':'Open doors';
-  render();
-});
 function describePart(title,description){
   document.getElementById('part-title').textContent=title;
   document.getElementById('part-text').textContent=description;
@@ -334,7 +340,8 @@ const partActions={
     render();
   },
   door:()=>{
-    doorsButton.click();
+    doorsOpen=!doorsOpen;
+    render();
     describePart('Doors',doorsOpen
       ? 'The doors pivot outward on hinges near the front edge. Select Door again to close them.'
       : 'The doors are closed. Select Door to swing them open.');
@@ -345,7 +352,8 @@ const partActions={
     render();
   },
   light:()=>{
-    lightsButton.click();
+    headlightsOn=!headlightsOn;
+    render();
     describePart('Headlights',headlightsOn
       ? 'The headlights are on. They illuminate the road ahead.'
       : 'The headlights are off. Select Lights to switch them on.');
@@ -361,10 +369,28 @@ for(const button of document.querySelectorAll('[data-view]')){
     render();
   });
 }
+document.getElementById('car-select').addEventListener('change',event=>{
+  car=profiles[event.target.value];
+  document.getElementById('car-name').textContent=car.name;
+  document.getElementById('car-description').textContent=car.description;
+  doorsOpen=false;
+  hoodOpen=false;
+  headlightsOn=true;
+  describePart('Explore the car','Select a label on the model to see what that part does.');
+  reset();
+});
 const swatches=document.querySelectorAll('.swatch');
+const customPaint=document.getElementById('custom-paint');
+customPaint.addEventListener('input',()=>{
+  paint=customPaint.value.slice(1).match(/../g).map(value=>parseInt(value,16));
+  for(const button of swatches) button.setAttribute('aria-pressed',false);
+  document.getElementById('paint-name').textContent='Paint · Custom '+customPaint.value.toUpperCase();
+  render();
+});
 for(const swatch of swatches){
   swatch.addEventListener('click',()=>{
     paint=swatch.dataset.paint.split(',').map(Number);
+    customPaint.value='#'+paint.map(value=>value.toString(16).padStart(2,'0')).join('');
     for(const button of swatches) button.setAttribute('aria-pressed',button===swatch);
     document.getElementById('paint-name').textContent='Paint · '+swatch.getAttribute('aria-label');
     render();
