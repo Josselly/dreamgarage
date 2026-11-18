@@ -296,6 +296,94 @@ function wheel(x,s) {
 }
 for(const x of [-1.58,1.54]) for(const s of [-1,1]) wheel(x,s);
 
+function createCarRenderer(){
+  const layer=document.createElement('canvas');
+  const gl=layer.getContext('webgl',{alpha:true,antialias:true,depth:true});
+  if(!gl) return null;
+  function compile(type,source){
+    const shader=gl.createShader(type);
+    gl.shaderSource(shader,source);
+    gl.compileShader(shader);
+    return shader;
+  }
+  const program=gl.createProgram();
+  gl.attachShader(program,compile(gl.VERTEX_SHADER,`
+    attribute vec3 position;
+    attribute vec3 color;
+    varying vec3 paintColor;
+    void main(){
+      gl_Position=vec4(position,1.0);
+      paintColor=color;
+    }
+  `));
+  gl.attachShader(program,compile(gl.FRAGMENT_SHADER,`
+    precision mediump float;
+    varying vec3 paintColor;
+    void main(){gl_FragColor=vec4(paintColor,1.0);}
+  `));
+  gl.linkProgram(program);
+  if(!gl.getProgramParameter(program,gl.LINK_STATUS)) return null;
+  const buffer=gl.createBuffer();
+  gl.useProgram(program);
+  gl.bindBuffer(gl.ARRAY_BUFFER,buffer);
+  for(const [index,name] of ['position','color'].entries()){
+    const attribute=gl.getAttribLocation(program,name);
+    gl.enableVertexAttribArray(attribute);
+    gl.vertexAttribPointer(attribute,3,gl.FLOAT,false,24,index*12);
+  }
+  gl.enable(gl.DEPTH_TEST);
+  gl.depthFunc(gl.LEQUAL);
+  return (triangles,width,height)=>{
+    if(gl.isContextLost()) return null;
+    if(layer.width!==width||layer.height!==height){
+      layer.width=width;
+      layer.height=height;
+    }
+    gl.viewport(0,0,width,height);
+    gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+    gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(triangles),gl.DYNAMIC_DRAW);
+    gl.drawArrays(gl.TRIANGLES,0,triangles.length/6);
+    return layer;
+  };
+}
+const renderCar=createCarRenderer();
+
+function surfaceLight(face){
+  if(face.fixed) return 1;
+  const [a,b,c]=face.world;
+  const u=b.map((value,i)=>value-a[i]);
+  const v=c.map((value,i)=>value-a[i]);
+  const normal=[u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]];
+  const facing=Math.abs((normal[0]*.28+normal[1]*.89+normal[2]*.34)/(Math.hypot(...normal)||1));
+  return face.color ? .67+.31*facing : .7+.29*facing;
+}
+
+function paintTriangles(mesh,width,height){
+  const vertexLights=new Map();
+  for(const face of mesh){
+    if(face.color) continue;
+    for(const point of face.world){
+      const key=point.join(',');
+      const sample=vertexLights.get(key)||{sum:0,count:0};
+      sample.sum+=face.light;
+      sample.count++;
+      vertexLights.set(key,sample);
+    }
+  }
+  const triangles=[];
+  for(const face of mesh){
+    const vertices=face.points.map(([x,y,depth],index)=>{
+      const sample=!face.color&&vertexLights.get(face.world[index].join(','));
+      const light=sample?sample.sum/sample.count:face.light;
+      return [2*x/width-1,1-2*y/height,-depth/8,...face.base.map(channel=>channel*light/255)];
+    });
+    for(let index=1;index<vertices.length-1;index++){
+      triangles.push(...vertices[0],...vertices[index],...vertices[index+1]);
+    }
+  }
+  return triangles;
+}
+
 function draw(){
   const w=canvas.clientWidth,h=canvas.clientHeight;
   const dpr=Math.min(devicePixelRatio,2);
@@ -354,44 +442,29 @@ function draw(){
     const dx=x-.62, dy=y-1.02, angle=.74;
     return [.62+dx*Math.cos(angle)-dy*Math.sin(angle),1.02+dx*Math.sin(angle)+dy*Math.cos(angle),z];
   }
-  const ordered=faces.filter(face=>(hoodOpen || face.feature!=='engine') && (!face.style || face.style===car.style)).map(face=>{
+  const mesh=faces.filter(face=>(hoodOpen || face.feature!=='engine') && (!face.style || face.style===car.style)).map(face=>{
     let world=face.points;
     if(doorsOpen && typeof face.feature==='number') world=world.map(point=>doorPoint(point,face.feature));
     if(hoodOpen && face.feature==='hood') world=world.map(hoodPoint);
-    const points=world.map(point=>project(shape(point)));
-    const depth=points.reduce((sum,p)=>sum+p[2],0)/points.length;
-    return {...face,points,depth,world};
-  }).sort((a,b)=>a.depth-b.depth);
-  for(const face of ordered){
-    const [a,b,c]=face.world;
-    const u=b.map((v,i)=>v-a[i]),v=c.map((n,i)=>n-a[i]);
-    const n=[u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]];
-    const length=Math.hypot(...n)||1;
-    const facing=Math.abs((n[0]*.28+n[1]*.89+n[2]*.34)/length);
-    const light=face.fixed?1:face.color?.67+.31*facing:.78+.21*facing;
-
+    world=world.map(shape);
+    const points=world.map(project);
     const color=face.feature==='headlight' && !headlightsOn ? [81,100,111] : face.color||paint;
-    if(face.feature==='headlight' && headlightsOn){
-      ctx.shadowBlur=5;
-      ctx.shadowColor='#ddedfa88';
-    }
     const brightness=(color[0]+color[1]+color[2])/3;
-    const rgb=color.map(value=>{
-      const toned=face.color?value:value*.89+brightness*.11;
-      return Math.min(255,Math.round(toned*light));
-    });
-    let fill='rgb('+rgb.join(',')+')';
-    if(!face.color && facing>.4){
-      const top=Math.min(...face.points.map(point=>point[1]));
-      const bottom=Math.max(...face.points.map(point=>point[1]));
-      if(bottom-top>2){
-        fill=ctx.createLinearGradient(0,top,0,bottom);
-        fill.addColorStop(0,'rgb('+rgb.map(channel=>Math.round(channel*.96+10)).join(',')+')');
-        fill.addColorStop(1,'rgb('+rgb.map(channel=>Math.round(channel*.97)).join(',')+')');
-      }
+    const base=face.color?color:color.map(channel=>channel*.89+brightness*.11);
+    return {...face,points,world,base,light:surfaceLight({...face,world})};
+  });
+  const layer=renderCar&&renderCar(paintTriangles(mesh,w,h),canvas.width,canvas.height);
+  if(layer){
+    ctx.drawImage(layer,0,0,w,h);
+  }else{
+    mesh.sort((a,b)=>averageDepth(a.points)-averageDepth(b.points));
+    for(const face of mesh){
+      const rgb=face.base.map(channel=>Math.round(channel*face.light));
+      polygon(face.points,'rgb('+rgb.join(',')+')',!face.color);
     }
-    polygon(face.points,fill,!face.color);
-    ctx.shadowBlur=0;
+  }
+  function averageDepth(points){
+    return points.reduce((sum,point)=>sum+point[2],0)/points.length;
   }
   const side=cy>=0?1:-1;
   const parts={
