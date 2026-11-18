@@ -45,6 +45,9 @@ dialog::backdrop{background:#05080bcc}
 .drive-score{display:flex;justify-content:space-between;gap:8px;font-size:13px;font-variant-numeric:tabular-nums;color:var(--accent)}
 .drive-controls{justify-content:center;flex-wrap:wrap;margin-top:8px}
 .drive-controls button{touch-action:none}
+.race-results{padding:10px 12px;background:#202930;border-radius:7px;margin:8px 0}
+.race-results h3{margin:0 0 4px;font-size:16px}
+.race-results p{margin:0;font-size:13px;color:var(--muted)}
 #drive-status{margin:5px 0 10px;font-size:14px;color:var(--muted)}
 @media(max-width:570px){main{padding-top:17px}.controls{gap:12px;padding:12px}.camera,.features{width:100%}.hint{left:12px}canvas{height:355px}}
 </style>
@@ -108,6 +111,11 @@ dialog::backdrop{background:#05080bcc}
 <span id="race-lap">Lap 1 / 2</span><span id="race-place">4th / 4</span><span id="race-speed">0 km/h</span>
 </div>
 <p id="drive-status" role="status">Use ↑ or W to accelerate, ↓ or S to brake, and ← and → to steer.</p>
+<section class="race-results" id="race-results" aria-labelledby="race-result-title" hidden>
+<h3 id="race-result-title"></h3>
+<p id="race-result-time"></p>
+<p id="race-result-best"></p>
+</section>
 <div class="drive-controls">
 <button data-direction="left" aria-label="Drive left">←</button>
 <button data-direction="up" aria-label="Accelerate">↑</button>
@@ -433,6 +441,17 @@ const game=document.getElementById('drive-game');
 const track=document.getElementById('track');
 const road=track.getContext('2d');
 const driveStatus=document.getElementById('drive-status');
+const results=document.getElementById('race-results');
+const resultsTitle=document.getElementById('race-result-title');
+const resultsTime=document.getElementById('race-result-time');
+const resultsBest=document.getElementById('race-result-best');
+const handling={
+  coupe:{speed:72,acceleration:19,steering:1,description:'Highest top speed'},
+  sedan:{speed:68,acceleration:20,steering:.83,description:'Steadier steering'},
+  hatch:{speed:65,acceleration:23,steering:1.23,description:'Quickest steering and acceleration'}
+};
+const sessionBests={};
+let lapOneTime=null;
 const raceButton=document.getElementById('drive-reset');
 const lapLabel=document.getElementById('race-lap');
 const placeLabel=document.getElementById('race-place');
@@ -567,6 +586,8 @@ function resetRace(){
     car.finished=false;
   }
   raceTime=0;
+  lapOneTime=null;
+  results.hidden=true;
   heldKeys.clear();
   heldPointers.clear();
   updateRace();
@@ -578,6 +599,28 @@ function endRace(message){
   driveStatus.textContent=message;
   raceButton.textContent='Race again';
   raceButton.focus();
+}
+
+function showRaceResults(place,totalTime){
+  const key='dreamgarage.best.'+driverShape;
+  let previous=sessionBests[driverShape];
+  try {
+    const saved=Number(localStorage.getItem(key));
+    if(Number.isFinite(saved)&&saved>0) previous=Math.min(previous??Infinity,saved);
+  } catch {
+    // Keep the session record when browser storage is unavailable.
+  }
+  const newBest=previous===undefined||totalTime<previous;
+  const best=newBest?totalTime:previous;
+  sessionBests[driverShape]=best;
+  if(newBest){
+    try {localStorage.setItem(key,String(best));} catch {}
+  }
+  const fastestLap=Math.min(lapOneTime,totalTime-lapOneTime);
+  resultsTitle.textContent=placements[place]+' place · '+totalTime.toFixed(2)+' s';
+  resultsTime.textContent='Fastest lap: '+fastestLap.toFixed(2)+' s';
+  resultsBest.textContent=(newBest?'New personal best: ':'Personal best: ')+best.toFixed(2)+' s';
+  results.hidden=false;
 }
 
 function moveRival(rival,index,step){
@@ -613,11 +656,15 @@ function tickRace(time){
   const directions=new Set([...heldKeys].map(key=>keyDirections[key]));
   for(const direction of heldPointers.values()) directions.add(direction);
   const steer=Number(directions.has('right'))-Number(directions.has('left'));
-  const acceleration=directions.has('down')?-40:directions.has('up')?19:-8;
-  player.speed=clamp(player.speed+acceleration*step,0,69);
-  player.lane=clamp(player.lane+steer*step*(.65+player.speed*.018),-laneLimit,laneLimit);
+  const setup=handling[driverShape];
+  const acceleration=directions.has('down')?-40:directions.has('up')?setup.acceleration:-8;
+  player.speed=clamp(player.speed+acceleration*step,0,setup.speed);
+  player.lane=clamp(player.lane+steer*step*setup.steering*(.65+player.speed*.018),-laneLimit,laneLimit);
   opponents.forEach((rival,index)=>moveRival(rival,index,step));
-  player.distance=Math.min(finish,player.distance+player.speed*step);
+  const before=player.distance;
+  player.distance=Math.min(finish,before+player.speed*step);
+  const crossingTime=marker=>raceTime-step+(marker-before)/player.speed;
+  if(before<lapLength && player.distance>=lapLength) lapOneTime=crossingTime(lapLength);
   const place=updateRace();
   drawRace();
   const crashed=opponents.some(car=>!car.finished
@@ -626,7 +673,9 @@ function tickRace(time){
   if(crashed){
     endRace('Crash! Your car touched a rival. Choose Race again to restart.');
   }else if(player.distance>=finish){
-    endRace('You finished '+placements[place]+' in '+raceTime.toFixed(1)+' seconds.');
+    const totalTime=crossingTime(finish);
+    showRaceResults(place,totalTime);
+    endRace('Race complete.');
   }else{
     driveFrame=requestAnimationFrame(tickRace);
   }
@@ -637,7 +686,7 @@ document.getElementById('drive').addEventListener('click',()=>{
   driverShape=document.getElementById('car-select').value;
   document.getElementById('drive-title').textContent=car.name+' test drive';
   resetRace();
-  driveStatus.textContent='Use ↑ or W to accelerate, ↓ or S to brake, and ← and → to steer.';
+  driveStatus.textContent=handling[driverShape].description+'. Use ↑ or W to accelerate, ↓ or S to brake, and ← and → to steer.';
   raceButton.textContent='Start race';
   game.showModal();
   raceButton.focus();
