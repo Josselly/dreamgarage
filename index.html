@@ -103,17 +103,17 @@ dialog::backdrop{background:#05080bcc}
 <h2 id="drive-title">Test drive</h2>
 <button id="drive-close" aria-label="Close test drive">✕</button>
 </div>
-<canvas id="track" width="360" height="400" aria-label="Free-roam driving course with collectible coins."></canvas>
+<canvas id="track" width="480" height="400" aria-label="Behind-the-car view of a two-lap race."></canvas>
 <div class="drive-score" aria-label="Game score">
-<span id="drive-coins">Coins 0 / 18</span>
+<span id="race-lap">Lap 1 / 2</span><span id="race-place">4th / 4</span><span id="race-speed">0 km/h</span>
 </div>
-<p id="drive-status" role="status">Use the arrow keys, WASD, or hold the buttons to drive and collect coins.</p>
+<p id="drive-status" role="status">Use ↑ or W to accelerate, ↓ or S to brake, and ← and → to steer.</p>
 <div class="drive-controls">
 <button data-direction="left" aria-label="Drive left">←</button>
-<button data-direction="up" aria-label="Drive up">↑</button>
-<button data-direction="down" aria-label="Drive down">↓</button>
+<button data-direction="up" aria-label="Accelerate">↑</button>
+<button data-direction="down" aria-label="Brake">↓</button>
 <button data-direction="right" aria-label="Drive right">→</button>
-<button id="drive-reset">Reset course</button>
+<button id="drive-reset">Start race</button>
 </div>
 </dialog>
 <script>
@@ -433,134 +433,191 @@ const game=document.getElementById('drive-game');
 const track=document.getElementById('track');
 const road=track.getContext('2d');
 const driveStatus=document.getElementById('drive-status');
-const coinsLabel=document.getElementById('drive-coins');
-const field={width:900,height:900};
-const coinSpots=[
-  [450,670],[450,555],[450,450],[450,335],[450,220],
-  [240,735],[160,580],[155,385],[225,225],[340,145],
-  [590,155],[720,230],[755,380],[730,560],[650,720],
-  [315,530],[580,385],[540,620]
-];
+const raceButton=document.getElementById('drive-reset');
+const lapLabel=document.getElementById('race-lap');
+const placeLabel=document.getElementById('race-place');
+const speedLabel=document.getElementById('race-speed');
+const lapLength=900;
+const finish=lapLength*2;
+const placements=['1st','2nd','3rd','4th'];
 const keyDirections={
   ArrowLeft:'left',ArrowRight:'right',ArrowUp:'up',ArrowDown:'down',
   a:'left',d:'right',w:'up',s:'down'
 };
 const heldKeys=new Set(), heldPointers=new Map();
-const player={x:450,y:762,angle:0};
-let driveFrame=0,lastTime=0,coins=[];
+const player={distance:0,lane:0,speed:0};
+const opponents=[
+  {start:12,lane:-.58,speed:43,color:'#4174b4'},
+  {start:20,lane:.58,speed:47,color:'#d8c374'},
+  {start:30,lane:.14,speed:50,color:'#83919b'}
+];
+const sky=road.createLinearGradient(0,0,0,160);
+sky.addColorStop(0,'#467b9b');
+sky.addColorStop(1,'#e0e4da');
+let driveFrame=0,lastTime=0,raceTime=0,running=false;
 let driverColor='#ef693c',driverShape='coupe';
 
-function drawCar(x,y,color,style){
-  const height=style==='sedan'?68:style==='hatch'?55:62;
-  const width=style==='hatch'?38:44;
-  road.fillStyle='#11161b';
-  for(const side of [-1,1]){
-    for(const axle of [-1,1]){
-      road.fillRect(x+side*(width/2)-4,y+axle*height*.28-6,8,12);
-    }
-  }
-  road.fillStyle=color;
-  road.beginPath();
-  road.roundRect(x-width/2,y-height/2,width,height,9);
-  road.fill();
-  road.fillStyle='#1b2b36';
-  road.fillRect(x-width*.36,y-height*.22,width*.72,height*.14);
-  road.fillRect(x-width*.31,y+height*.16,width*.62,height*.09);
-  road.fillStyle='#eff9ff';
-  road.fillRect(x-width*.38,y-height*.38,8,4);
-  road.fillRect(x+width*.38-8,y-height*.38,8,4);
+function bend(distance){
+  const angle=distance/lapLength*Math.PI*2;
+  return 1.7*Math.sin(angle)+.65*Math.sin(angle*2+.5);
 }
 
+function projectRoad(depth){
+  const scale=1/(depth+10);
+  const shift=bend(player.distance+depth)-bend(player.distance);
+  return {x:240+(shift-player.lane)*1400*scale,y:122+2700*scale,w:1400*scale};
+}
 
-function drawCourse(){
-  const cameraX=clamp(player.x-180,0,field.width-360);
-  const cameraY=clamp(player.y-200,0,field.height-400);
-  road.fillStyle='#23382f';
-  road.fillRect(0,0,360,400);
-  road.save();
-  road.translate(-cameraX,-cameraY);
-
-  road.fillStyle='#303940';
+function fillShape(color,points){
+  road.fillStyle=color;
   road.beginPath();
-  road.roundRect(67,66,766,768,86);
+  points.forEach(([x,y],index)=>index?road.lineTo(x,y):road.moveTo(x,y));
+  road.closePath();
   road.fill();
-  road.strokeStyle='#f6de9b';
-  road.lineWidth=3;
-  road.stroke();
+}
 
-  road.strokeStyle='#8c9da36e';
-  road.lineWidth=2;
-  road.setLineDash([15,15]);
+function band(far,near,left,right,color){
+  fillShape(color,[
+    [far.x+far.w*left,far.y],[far.x+far.w*right,far.y],
+    [near.x+near.w*right,near.y],[near.x+near.w*left,near.y]
+  ]);
+}
+
+function drawRaceCar(x,y,width,color,style){
+  const height=width*(style==='hatch'?.66:style==='sedan'?.56:.49);
+  const w=width/2;
+  road.save();
+  road.translate(x,y);
+  road.fillStyle='#0a111877';
   road.beginPath();
-  road.roundRect(135,135,630,630,65);
-  road.moveTo(450,135);
-  road.lineTo(450,765);
-  road.moveTo(135,450);
-  road.lineTo(765,450);
-  road.stroke();
-  road.setLineDash([]);
-
-  for(const coin of coins){
-    road.fillStyle='#ffd66b';
-    road.beginPath();
-    road.arc(coin.x,coin.y,11,0,Math.PI*2);
-    road.fill();
-    road.strokeStyle='#795524';
-    road.lineWidth=2;
-    road.stroke();
-  }
-
-  road.translate(player.x,player.y);
-  road.rotate(player.angle);
-  drawCar(0,0,driverColor,driverShape);
+  road.ellipse(0,2,w*1.12,height*.24,0,0,Math.PI*2);
+  road.fill();
+  road.fillStyle='#12181d';
+  road.fillRect(-w,-height*.43,width*.18,height*.46);
+  road.fillRect(w-width*.18,-height*.43,width*.18,height*.46);
+  fillShape(color,[[-w,-height*.2],[-w,-height*.58],[-w*.69,-height*.72],
+    [-w*.48,-height],[w*.48,-height],[w*.69,-height*.72],[w,-height*.58],[w,-height*.2]]);
+  fillShape('#22333e',[[-w*.63,-height*.68],[-w*.44,-height*.94],
+    [w*.44,-height*.94],[w*.63,-height*.68]]);
+  road.fillStyle='#111a22';
+  road.fillRect(-w*.93,-height*.38,width*.93,height*.15);
+  road.fillStyle='#f75443';
+  road.fillRect(-w*.88,-height*.51,width*.22,height*.11);
+  road.fillRect(w*.44,-height*.51,width*.22,height*.11);
+  road.fillStyle='#e8e1d0';
+  road.fillRect(-w*.16,-height*.36,width*.16,height*.08);
   road.restore();
 }
 
-function resetDrive(){
-  Object.assign(player,{x:450,y:762,angle:0});
-  coins=coinSpots.map(([x,y])=>({x,y}));
-  heldKeys.clear();
-  heldPointers.clear();
-  coinsLabel.textContent='Coins 0 / '+coinSpots.length;
-  driveStatus.textContent='Use the arrow keys, WASD, or hold the buttons to drive and collect coins.';
-  drawCourse();
+function drawRace(){
+  road.fillStyle=sky;
+  road.fillRect(0,0,480,400);
+  fillShape('#7b918b',[[0,118],[62,82],[113,103],[170,75],[240,106],
+    [315,71],[388,103],[449,81],[480,110],[480,150],[0,150]]);
+  road.fillStyle='#536344';
+  road.fillRect(0,122,480,278);
+  for(let index=70;index>=0;index--){
+    const depth=index*3;
+    const far=projectRoad(depth+3),near=projectRoad(depth);
+    const stripe=Math.floor((player.distance+depth)/6)%2;
+    road.fillStyle=stripe?'#5e704e':'#54674a';
+    road.fillRect(0,far.y,480,near.y-far.y+.7);
+    band(far,near,-1.08,1.08,stripe?'#d9cfbb':'#a44841');
+    band(far,near,-1,1,stripe?'#3b4043':'#393d40');
+    band(far,near,-.98,-.965,'#c3c3b7');
+    band(far,near,.965,.98,'#c3c3b7');
+    if(stripe) band(far,near,-.012,.012,'#a2a09a');
+    if((player.distance+depth)%lapLength<3){
+      for(let square=0;square<10;square++){
+        band(far,near,-1+square*.2,-.8+square*.2,square%2?'#e7e7df':'#171c1f');
+      }
+    }
+  }
+  const visible=opponents.map(car=>({...car,depth:car.distance-player.distance}))
+    .filter(car=>car.depth>2 && car.depth<210).sort((a,b)=>b.depth-a.depth);
+  for(const car of visible){
+    const point=projectRoad(car.depth);
+    drawRaceCar(point.x+car.lane*point.w,point.y,point.w*.35,car.color,'sedan');
+  }
+  drawRaceCar(240+clamp(player.lane,-1.3,1.3)*30,365,110,driverColor,driverShape);
 }
 
-function tick(time){
-  const step=Math.min(Math.max((time-lastTime)/1000,0),.05);
+function updateRace(){
+  const place=opponents.filter(car=>car.distance>player.distance || car.finished).length;
+  lapLabel.textContent='Lap '+Math.min(2,Math.floor(player.distance/lapLength)+1)+' / 2';
+  placeLabel.textContent=placements[place]+' / 4';
+  speedLabel.textContent=Math.round(player.speed*3.6)+' km/h';
+  return place;
+}
+
+function resetRace(){
+  Object.assign(player,{distance:0,lane:0,speed:0});
+  for(const car of opponents){
+    car.distance=car.start;
+    car.finished=false;
+  }
+  raceTime=0;
+  heldKeys.clear();
+  heldPointers.clear();
+  updateRace();
+  drawRace();
+}
+
+function tickRace(time){
+  if(!running) return;
+  const step=clamp((time-lastTime)/1000,0,.05);
   lastTime=time;
+  raceTime+=step;
   const directions=new Set([...heldKeys].map(key=>keyDirections[key]));
   for(const direction of heldPointers.values()) directions.add(direction);
-  const dx=Number(directions.has('right'))-Number(directions.has('left'));
-  const dy=Number(directions.has('down'))-Number(directions.has('up'));
-  if(dx||dy){
-    const distance=210*step/Math.hypot(dx,dy);
-    player.x=clamp(player.x+dx*distance,38,field.width-38);
-    player.y=clamp(player.y+dy*distance,38,field.height-38);
-    player.angle=Math.atan2(dx,-dy);
-    const remaining=coins.filter(coin=>Math.hypot(player.x-coin.x,player.y-coin.y)>=31);
-    if(remaining.length!==coins.length){
-      coins=remaining;
-      coinsLabel.textContent='Coins '+(coinSpots.length-coins.length)+' / '+coinSpots.length;
-      if(!coins.length) driveStatus.textContent='You collected every coin! Keep driving or reset the course.';
+  const steer=Number(directions.has('right'))-Number(directions.has('left'));
+  const offTrack=Math.abs(player.lane)>.98;
+  const acceleration=directions.has('down')?-40:directions.has('up')?19:-8;
+  player.speed=clamp(player.speed+(acceleration-(offTrack?18:0))*step,0,69);
+  player.lane=clamp(player.lane+steer*step*(.65+player.speed*.018),-1.42,1.42);
+  for(const car of opponents){
+    if(!car.finished){
+      car.distance+=car.speed*step;
+      car.finished=car.distance>=finish;
+      if(Math.abs(car.distance-player.distance)<7 && Math.abs(car.lane-player.lane)<.27){
+        player.speed=Math.min(player.speed,car.speed*.74);
+      }
     }
-    drawCourse();
   }
-  driveFrame=requestAnimationFrame(tick);
+  player.distance=Math.min(finish,player.distance+player.speed*step);
+  const place=updateRace();
+  drawRace();
+  if(player.distance>=finish){
+    running=false;
+    driveStatus.textContent='You finished '+placements[place]+' in '+raceTime.toFixed(1)+' seconds.';
+    raceButton.textContent='Race again';
+  }else{
+    driveFrame=requestAnimationFrame(tickRace);
+  }
 }
 
 document.getElementById('drive').addEventListener('click',()=>{
   driverColor='rgb('+paint.join(',')+')';
   driverShape=document.getElementById('car-select').value;
   document.getElementById('drive-title').textContent=car.name+' test drive';
-  resetDrive();
+  resetRace();
+  driveStatus.textContent='Use ↑ or W to accelerate, ↓ or S to brake, and ← and → to steer.';
+  raceButton.textContent='Start race';
   game.showModal();
-  lastTime=performance.now();
-  driveFrame=requestAnimationFrame(tick);
+  raceButton.focus();
 });
 document.getElementById('drive-close').addEventListener('click',()=>game.close());
-document.getElementById('drive-reset').addEventListener('click',resetDrive);
+raceButton.addEventListener('click',()=>{
+  cancelAnimationFrame(driveFrame);
+  resetRace();
+  running=true;
+  lastTime=performance.now();
+  raceButton.textContent='Restart';
+  driveStatus.textContent='Hold accelerate. Stay on the track and steer around the other cars.';
+  driveFrame=requestAnimationFrame(tickRace);
+});
 game.addEventListener('close',()=>{
+  running=false;
   cancelAnimationFrame(driveFrame);
   heldKeys.clear();
   heldPointers.clear();
@@ -581,7 +638,7 @@ window.addEventListener('blur',()=>{
 });
 for(const button of document.querySelectorAll('[data-direction]')){
   button.addEventListener('pointerdown',event=>{
-    if(event.button!==0) return;
+    if(event.button!==0 || !running) return;
     button.setPointerCapture(event.pointerId);
     heldPointers.set(event.pointerId,button.dataset.direction);
   });
