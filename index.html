@@ -138,8 +138,19 @@ const profiles={
 };
 let car=profiles.coupe;
 function shape([x,y,z]){
+  if(car.style==='coupe'){
+    const cabin=Math.max(0,(y-1.02)/.65);
+    return [x*car.length-car.rear*cabin*.65,y+cabin*car.roof,z*car.width];
+  }
   const cabin=Math.max(0,(y-1.02)/.65);
-  return [x*car.length-car.rear*cabin*.65, y+cabin*car.roof, z*car.width];
+  const nose=Math.max(0,Math.min(1,(x-1.45)/1.09));
+  const tail=Math.max(0,Math.min(1,(-x-1.5)/1.05));
+  const rearCabin=x<0?cabin:0;
+  if(car.style==='sedan'){
+    return [x*car.length-.2*rearCabin,y+.19*cabin+.09*nose+.08*tail,z*car.width];
+  }
+  return [x*car.length-.68*rearCabin-.13*tail,
+    y+.31*cabin+.08*nose+.12*tail,z*car.width];
 }
 const hotspots = [...document.querySelectorAll('[data-part]')];
 const add = (points, color, fixed = false, feature = '', style = '') => faces.push({points, color, fixed, feature, style});
@@ -200,16 +211,23 @@ for(const s of [-1,1]){
     return [x,1.01-(x-1.7)*.22,s*(.87+.10*Math.sin(angle))];
   });
   add(lens,[214,247,255],true,'headlight','coupe');
-  // Wrap the sedan and hatchback lenses over the front corners so they
-  // remain visible from the front and the default three-quarter view.
-  add([[2.555,.738,s*.29],[2.555,.738,s*.73],[2.555,.668,s*.76],[2.555,.678,s*.30]],
-    [214,247,255],true,'headlight','sedan');
-  add([[2.555,.738,s*.29],[2.555,.738,s*.73],[2.25,.93,s*.93],[2.28,.905,s*.62]],
-    [214,247,255],true,'headlight','sedan');
-  add([[2.555,.734,s*.38],[2.555,.734,s*.76],[2.555,.682,s*.76],[2.555,.692,s*.39]],
-    [214,247,255],true,'headlight','hatch');
-  add([[2.555,.734,s*.38],[2.555,.734,s*.76],[2.14,.934,s*.97],[2.29,.91,s*.73]],
-    [214,247,255],true,'headlight','hatch');
+  const sedanLens=[
+    [[2.556,.738,s*.29],[2.556,.738,s*.73],[2.556,.668,s*.76],[2.556,.678,s*.30]],
+    [[2.556,.738,s*.29],[2.556,.738,s*.73],[2.25,.925,s*.92],[2.28,.902,s*.62]]
+  ];
+  const hatchLens=[
+    [[2.556,.734,s*.38],[2.556,.734,s*.76],[2.556,.682,s*.76],[2.556,.692,s*.39]],
+    [[2.556,.734,s*.38],[2.556,.734,s*.76],[2.14,.93,s*.96],[2.29,.905,s*.73]]
+  ];
+  for(const [style,lenses] of [['sedan',sedanLens],['hatch',hatchLens]]){
+    for(const lens of lenses){
+      add(lens,[23,33,42],true,'',style);
+      const center=lens[0].map((_,axis)=>lens.reduce((sum,point)=>sum+point[axis],0)/lens.length);
+      const inset=lens.map(point=>point.map((value,axis)=>center[axis]+(value-center[axis])*.76
+        +(axis===0?.003:axis===1?.004:0)));
+      add(inset,[225,247,255],true,'headlight',style);
+    }
+  }
   add([[-2.562,.8,s*.36],[-2.562,.8,s*.77],[-2.562,.718,s*.82],[-2.562,.715,s*.36]],
     [241,47,66],true,'','sedan');
   add([[-2.568,.814,s*.47],[-2.568,.814,s*.76],[-2.568,.69,s*.8],
@@ -223,6 +241,12 @@ for(const s of [-1,1]){
     [21,26,32],true,'','sedan');
   add([[-2.17,1.002,s*.47],[-2.29,1.21,s*.47],[-2.13,1.21,s*.47],[-1.998,1.007,s*.47]],
     [25,31,37],false,'','hatch');
+  add([[2.559,.585,s*.37],[2.559,.585,s*.73],[2.559,.515,s*.67],[2.559,.525,s*.39]],
+    [19,24,29],true,'','sedan');
+  add([[-1.08,.611,s*1.066],[-.87,.615,s*1.047],[.6,.61,s*1.037],[.6,.57,s*1.037]],
+    [47,54,59],true,s,'sedan');
+  add([[-1.08,.58,s*1.066],[-.87,.58,s*1.047],[.6,.56,s*1.037],[.6,.524,s*1.037]],
+    [38,43,49],true,s,'hatch');
   add([[.55,1.004,s*.94],[.44,1.117,s*1.13],[.64,1.107,s*1.13],[.71,1.04,s*.94]],
     null,false,s);
 
