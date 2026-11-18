@@ -21,7 +21,7 @@ canvas{display:block;width:100%;height:clamp(330px,51vh,580px);touch-action:none
 canvas:active{cursor:grabbing}
 .hint{position:absolute;bottom:13px;left:17px;color:#c2cbd0;font-size:12px;margin:0;pointer-events:none}
 .controls{display:flex;flex-wrap:wrap;gap:14px 30px;align-items:center;justify-content:space-between;padding:16px;border-top:1px solid var(--line)}
-.paint,.camera{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+.paint,.camera,.features{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
 #paint-name{flex-basis:100%;color:var(--muted);font-size:13px;margin:0;min-height:20px}
 button{border:1px solid #4d5962;background:#202930;color:inherit;border-radius:7px;min-width:44px;min-height:44px;font:inherit;padding:0 12px;cursor:pointer}
 button:hover{border-color:var(--accent)}
@@ -29,7 +29,7 @@ button:focus-visible,canvas:focus-visible{outline:2px solid var(--accent)}
 button.swatch{width:44px;padding:7px;display:grid;place-items:center}
 .swatch::before{content:'';width:24px;height:24px;background:var(--paint);border-radius:50%;border:1px solid #ffffff66}
 button[aria-pressed=true]{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
-@media(max-width:570px){main{padding-top:17px}.controls{gap:12px;padding:12px}.camera{width:100%}.hint{left:12px}canvas{height:355px}}
+@media(max-width:570px){main{padding-top:17px}.controls{gap:12px;padding:12px}.camera,.features{width:100%}.hint{left:12px}canvas{height:355px}}
 </style>
 </head>
 <body>
@@ -57,6 +57,13 @@ button[aria-pressed=true]{border-color:var(--accent);box-shadow:inset 0 0 0 1px 
 <button id="in" aria-label="Zoom in">+</button>
 <button id="reset">Reset view</button>
 </div>
+<div class="features" role="group" aria-label="Car features and preset views">
+<button id="lights" aria-pressed="true">Headlights</button>
+<button id="doors" aria-pressed="false">Open doors</button>
+<button data-view="front">Front</button>
+<button data-view="side">Side</button>
+<button data-view="rear">Rear</button>
+</div>
 </div>
 </section>
 </main>
@@ -66,7 +73,8 @@ const ctx = canvas.getContext('2d');
 const faces = [];
 let paint = [239,105,60];
 let yaw = 0.58, pitch = 0.34, zoom = 1;
-const add = (points, color, fixed = false) => faces.push({points, color, fixed});
+let headlightsOn = true, doorsOpen = false;
+const add = (points, color, fixed = false, feature = '') => faces.push({points, color, fixed, feature});
 
 function body(sections, materials) {
   const rings = sections.map(([x,w,b,t]) => [
@@ -76,7 +84,14 @@ function body(sections, materials) {
   for (let i=1;i<rings.length;i++) {
     for (let j=0;j<8;j++) {
       const k=(j+1)%8;
-      add([rings[i-1][j],rings[i-1][k],rings[i][k],rings[i][j]],materials[j]);
+      const doorSection = i === 4 && (j === 2 || j === 3 || j === 5 || j === 6);
+      const doorSide = j < 4 ? 1 : -1;
+      const points = [rings[i-1][j],rings[i-1][k],rings[i][k],rings[i][j]];
+      if (doorSection) {
+        const interior = points.map(([x,y,z])=>[x,y,z*.85]);
+        add(interior,[30,33,37]);
+      }
+      add(points,materials[j],false,doorSection ? doorSide : '');
     }
   }
   add(rings[0],[42,45,49]);
@@ -100,7 +115,7 @@ for(let i=0;i<4;i++){
 }
 for(const s of [-1,1]){
   add([[.18,1.015,s*.785],[.24,1.015,s*.785],[-.03,1.604,s*.584],[-.105,1.602,s*.584]],[22,27,32]);
-  add([[1.66,.98,s*.96],[2.33,.865,s*.92],[2.525,.739,s*.76],[2.44,.779,s*.65],[1.91,.945,s*.76]],[214,247,255],true);
+  add([[1.66,.98,s*.96],[2.33,.865,s*.92],[2.525,.739,s*.76],[2.44,.779,s*.65],[1.91,.945,s*.76]],[214,247,255],true,'headlight');
   add([[-2.56,.8,s*.37],[-2.56,.8,s*.77],[-2.56,.718,s*.82],[-2.56,.715,s*.37]],[241,47,66],true);
 }
 add([[2.546,.64,-.64],[2.546,.64,.64],[2.546,.5,.68],[2.546,.5,-.68]],[19,24,28],true);
@@ -173,10 +188,19 @@ function draw(){
     });
     polygon(shadow,'rgba(4,8,11,.10)');
   }
+  function doorPoint([x,y,z],side){
+    const hingeX=.62, hingeZ=1.03*side;
+    const angle=-side*.95;
+    const dx=x-hingeX,dz=z-hingeZ;
+    return [hingeX+dx*Math.cos(angle)-dz*Math.sin(angle),y,hingeZ+dx*Math.sin(angle)+dz*Math.cos(angle)];
+  }
   const ordered=faces.map(face=>{
-    const points=face.points.map(project);
+    const world=doorsOpen && typeof face.feature==='number'
+      ? face.points.map(point=>doorPoint(point,face.feature))
+      : face.points;
+    const points=world.map(project);
     const depth=points.reduce((sum,p)=>sum+p[2],0)/points.length;
-    return {...face,points,depth,world:face.points};
+    return {...face,points,depth,world};
   }).sort((a,b)=>a.depth-b.depth);
   for(const face of ordered){
     const [a,b,c]=face.world;
@@ -184,8 +208,14 @@ function draw(){
     const n=[u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]];
     const length=Math.hypot(...n)||1;
     const light=face.fixed?1:.64+.42*Math.abs((n[0]*.28+n[1]*.89+n[2]*.34)/length);
-    const rgb=(face.color||paint).map(value=>Math.min(255,Math.round(value*light)));
+    const color=face.feature==='headlight' && !headlightsOn ? [81,100,111] : face.color||paint;
+    if(face.feature==='headlight' && headlightsOn){
+      ctx.shadowBlur=14;
+      ctx.shadowColor='#a2e9ff';
+    }
+    const rgb=color.map(value=>Math.min(255,Math.round(value*light)));
     polygon(face.points,'rgb('+rgb.join(',')+')');
+    ctx.shadowBlur=0;
   }
 }
 let frame;
@@ -231,6 +261,28 @@ canvas.addEventListener('keydown',event=>{
 });
 for(const [id,key] of Object.entries({left:'ArrowLeft',right:'ArrowRight',out:'-',in:'+',reset:'Home'})){
   document.getElementById(id).addEventListener('click',actions[key]);
+}
+const lightsButton=document.getElementById('lights');
+lightsButton.addEventListener('click',()=>{
+  headlightsOn=!headlightsOn;
+  lightsButton.setAttribute('aria-pressed',headlightsOn);
+  render();
+});
+const doorsButton=document.getElementById('doors');
+doorsButton.addEventListener('click',()=>{
+  doorsOpen=!doorsOpen;
+  doorsButton.setAttribute('aria-pressed',doorsOpen);
+  doorsButton.textContent=doorsOpen?'Close doors':'Open doors';
+  render();
+});
+const viewAngles={front:Math.PI/2,side:0,rear:-Math.PI/2};
+for(const button of document.querySelectorAll('[data-view]')){
+  button.addEventListener('click',()=>{
+    yaw=viewAngles[button.dataset.view];
+    pitch=.25;
+    zoom=1;
+    render();
+  });
 }
 const swatches=document.querySelectorAll('.swatch');
 for(const swatch of swatches){
