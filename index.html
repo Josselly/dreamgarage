@@ -160,22 +160,33 @@ function body(sections, materials) {
     [x,b,-w*.82],[x,b,w*.82],[x,b+.23,w],[x,t-.13,w],[x,t,w*.74],
     [x,t,-w*.74],[x,t-.13,-w],[x,b+.23,-w]
   ]);
-  for (let i=1;i<rings.length;i++) {
-    for (let j=0;j<8;j++) {
-      const k=(j+1)%8;
-      const doorSection = i === 4 && (j === 2 || j === 3 || j === 5 || j === 6);
-      const doorSide = j < 4 ? 1 : -1;
-      const points = [rings[i-1][j],rings[i-1][k],rings[i][k],rings[i][j]];
-      if (doorSection) {
-        const interior = points.map(([x,y,z])=>[x,y,z*.85]);
-        add(interior,[30,33,37]);
-      }
-      const hoodPanel = i >= 5 && j === 4;
-      add(points,materials[j],false,doorSection ? doorSide : hoodPanel ? 'hood' : '');
+  const steps=5;
+  const rounded=rings.map(ring=>ring.flatMap((point,j)=>{
+    const previous=ring[(j+7)%8],next=ring[(j+1)%8],after=ring[(j+2)%8];
+    return Array.from({length:steps},(_,index)=>{
+      const t=index/steps, u=1-t;
+      return point.map((value,axis)=>{
+        const a=value+(next[axis]-previous[axis])*.12;
+        const b=next[axis]-(after[axis]-value)*.12;
+        const curve=u*u*u*value+3*u*u*t*a+3*u*t*t*b+t*t*t*next[axis];
+        const straight=u*value+t*next[axis];
+        return straight+(curve-straight)*.65;
+      });
+    });
+  }));
+  for(let i=1;i<rounded.length;i++){
+    for(let k=0;k<8*steps;k++){
+      const j=Math.floor(k/steps), next=(k+1)%(8*steps);
+      const points=[rounded[i-1][k],rounded[i-1][next],rounded[i][next],rounded[i][k]];
+      const doorSection=i===4&&(j===2||j===3||j===5||j===6);
+      const doorSide=j<4?1:-1;
+      if(doorSection) add(points.map(([x,y,z])=>[x,y,z*.85]),[30,33,37]);
+      const hoodPanel=i>=5&&j===4;
+      add(points,materials[j],false,doorSection?doorSide:hoodPanel?'hood':'');
     }
   }
-  add(rings[0],[42,45,49]);
-  add(rings.at(-1),null);
+  add(rounded[0],[42,45,49]);
+  add(rounded.at(-1),null);
 }
 
 body([
@@ -309,7 +320,7 @@ function draw(){
     ctx.fill();
     if(sealEdges){
       ctx.strokeStyle=fill;
-      ctx.lineWidth=.65;
+      ctx.lineWidth=.8;
       ctx.stroke();
     }
   }
@@ -357,7 +368,7 @@ function draw(){
     const n=[u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]];
     const length=Math.hypot(...n)||1;
     const facing=Math.abs((n[0]*.28+n[1]*.89+n[2]*.34)/length);
-    const light=face.fixed?1:.67+.31*facing;
+    const light=face.fixed?1:face.color?.67+.31*facing:.78+.21*facing;
 
     const color=face.feature==='headlight' && !headlightsOn ? [81,100,111] : face.color||paint;
     if(face.feature==='headlight' && headlightsOn){
@@ -375,8 +386,8 @@ function draw(){
       const bottom=Math.max(...face.points.map(point=>point[1]));
       if(bottom-top>2){
         fill=ctx.createLinearGradient(0,top,0,bottom);
-        fill.addColorStop(0,'rgb('+rgb.map(channel=>Math.round(channel*.91+20)).join(',')+')');
-        fill.addColorStop(1,'rgb('+rgb.map(channel=>Math.round(channel*.94)).join(',')+')');
+        fill.addColorStop(0,'rgb('+rgb.map(channel=>Math.round(channel*.96+10)).join(',')+')');
+        fill.addColorStop(1,'rgb('+rgb.map(channel=>Math.round(channel*.97)).join(',')+')');
       }
     }
     polygon(face.points,fill,!face.color);
