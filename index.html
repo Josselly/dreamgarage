@@ -19,6 +19,10 @@ h1{margin:9px 0 0;font-size:clamp(48px,8vw,106px);line-height:.96;letter-spacing
 .viewport{position:relative;background:radial-gradient(ellipse at 49% 44%,#384750,#222d36 55%,#171e24 100%)}
 canvas{display:block;width:100%;height:clamp(330px,51vh,580px);touch-action:none;cursor:grab;outline-offset:-4px}
 canvas:active{cursor:grabbing}
+.hotspots{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+.hotspot{position:absolute;transform:translate(-50%,-50%);pointer-events:auto;background:#111a22;color:var(--accent);border-color:#eaff8f99;font-size:12px;font-weight:650;white-space:nowrap}
+.part-info{margin:0;padding:12px 16px;border-top:1px solid var(--line);color:var(--muted)}
+.part-info strong{color:var(--ink);margin-right:8px}
 .hint{position:absolute;bottom:13px;left:17px;color:#c2cbd0;font-size:12px;margin:0;pointer-events:none}
 .controls{display:flex;flex-wrap:wrap;gap:14px 30px;align-items:center;justify-content:space-between;padding:16px;border-top:1px solid var(--line)}
 .paint,.camera,.features{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
@@ -40,8 +44,15 @@ button[aria-pressed=true]{border-color:var(--accent);box-shadow:inset 0 0 0 1px 
 <section class="studio" aria-label="Car configurator">
 <div class="viewport">
 <canvas id="view" tabindex="0" aria-label="Interactive 3D sports car. Arrow keys rotate, plus and minus zoom, Home resets." aria-describedby="hint">This showroom requires a browser with Canvas support.</canvas>
+<div class="hotspots" role="group" aria-label="Explore car parts">
+<button class="hotspot" data-part="engine">Engine</button>
+<button class="hotspot" data-part="door">Door</button>
+<button class="hotspot" data-part="wheel">Wheel</button>
+<button class="hotspot" data-part="light">Lights</button>
+</div>
 <p class="hint" id="hint">Drag to rotate · Scroll or pinch to zoom</p>
 </div>
+<p class="part-info" aria-live="polite"><strong id="part-title">Explore the car</strong><span id="part-text">Select a label on the model to see what that part does.</span></p>
 <div class="controls">
 <div class="paint" role="group" aria-label="Paint color">
 <p id="paint-name" aria-live="polite">Paint · Signal Orange</p>
@@ -73,7 +84,8 @@ const ctx = canvas.getContext('2d');
 const faces = [];
 let paint = [239,105,60];
 let yaw = 0.58, pitch = 0.34, zoom = 1;
-let headlightsOn = true, doorsOpen = false;
+let headlightsOn = true, doorsOpen = false, hoodOpen = false;
+const hotspots = [...document.querySelectorAll('[data-part]')];
 const add = (points, color, fixed = false, feature = '') => faces.push({points, color, fixed, feature});
 
 function body(sections, materials) {
@@ -91,7 +103,8 @@ function body(sections, materials) {
         const interior = points.map(([x,y,z])=>[x,y,z*.85]);
         add(interior,[30,33,37]);
       }
-      add(points,materials[j],false,doorSection ? doorSide : '');
+      const hoodPanel = i >= 5 && j === 4;
+      add(points,materials[j],false,doorSection ? doorSide : hoodPanel ? 'hood' : '');
     }
   }
   add(rings[0],[42,45,49]);
@@ -103,6 +116,16 @@ body([
   [-.82,1.04,.33,1.09],[.62,1.03,.33,1.02],
   [1.48,1.11,.34,.99],[2.22,1.07,.39,.92],[2.54,.91,.47,.73]
 ],[[37,40,43],null,null,null,null,null,null,null]);
+
+// Simplified engine bay and engine cover under the hood.
+add([[.63,.81,-.73],[.63,.81,.73],[2.51,.67,.68],[2.51,.67,-.68]],[23,30,36],true,'engine');
+add([[1.02,.89,-.39],[1.02,.89,.39],[1.93,.85,.39],[1.93,.85,-.39]],[105,111,118],true,'engine');
+for(const side of [-1,1]){
+  for(let x=1.12;x<1.9;x+=.14){
+    add([[x,.908,side*.13],[x,.908,side*.37],[x+.073,.903,side*.37],[x+.073,.903,side*.13]],[181,187,190],true,'engine');
+  }
+}
+add([[1.05,.916,-.09],[1.05,.916,.09],[1.9,.876,.09],[1.9,.876,-.09]],[51,57,63],true,'engine');
 
 // Cabin glass and painted roof.
 const glass=[53,76,89], sideGlass=[38,57,69];
@@ -194,10 +217,14 @@ function draw(){
     const dx=x-hingeX,dz=z-hingeZ;
     return [hingeX+dx*Math.cos(angle)-dz*Math.sin(angle),y,hingeZ+dx*Math.sin(angle)+dz*Math.cos(angle)];
   }
-  const ordered=faces.map(face=>{
-    const world=doorsOpen && typeof face.feature==='number'
-      ? face.points.map(point=>doorPoint(point,face.feature))
-      : face.points;
+  function hoodPoint([x,y,z]){
+    const dx=x-.62, dy=y-1.02, angle=.74;
+    return [.62+dx*Math.cos(angle)-dy*Math.sin(angle),1.02+dx*Math.sin(angle)+dy*Math.cos(angle),z];
+  }
+  const ordered=faces.filter(face=>hoodOpen || face.feature!=='engine').map(face=>{
+    let world=face.points;
+    if(doorsOpen && typeof face.feature==='number') world=world.map(point=>doorPoint(point,face.feature));
+    if(hoodOpen && face.feature==='hood') world=world.map(hoodPoint);
     const points=world.map(project);
     const depth=points.reduce((sum,p)=>sum+p[2],0)/points.length;
     return {...face,points,depth,world};
@@ -216,6 +243,24 @@ function draw(){
     const rgb=color.map(value=>Math.min(255,Math.round(value*light)));
     polygon(face.points,'rgb('+rgb.join(',')+')');
     ctx.shadowBlur=0;
+  }
+  const side=cy>=0?1:-1;
+  const parts={
+    engine:[1.49,hoodOpen?1.52:1.13,0],
+    door:doorsOpen?doorPoint([-.48,.83,side*1.05],side):[-.22,.79,side*1.11],
+    wheel:[1.54,.36,side*1.23],
+    light:[2.47,.84,side*.77]
+  };
+  const placed=[];
+  for(const button of hotspots){
+    const [x,y]=project(parts[button.dataset.part]);
+    const left=clamp(x,37,w-37);
+    const top=clamp(y,26,h-53);
+    const moved=placed.some(point=>Math.abs(point[0]-left)<74 && Math.abs(point[1]-top)<46);
+    const labelTop=moved?clamp(top+52,26,h-23):top;
+    placed.push([left,labelTop]);
+    button.style.left=left+'px';
+    button.style.top=labelTop+'px';
   }
 }
 let frame;
@@ -275,6 +320,38 @@ doorsButton.addEventListener('click',()=>{
   doorsButton.textContent=doorsOpen?'Close doors':'Open doors';
   render();
 });
+function describePart(title,description){
+  document.getElementById('part-title').textContent=title;
+  document.getElementById('part-text').textContent=description;
+}
+const partActions={
+  engine:()=>{
+    hoodOpen=!hoodOpen;
+    if(hoodOpen){yaw=.72;pitch=.59;zoom=1;}
+    describePart('Engine',hoodOpen
+      ? 'The hood is open. The engine supplies power that the transmission sends to the wheels. Select Engine again to close the hood.'
+      : 'The hood is closed. Select Engine to lift it and see the engine bay.');
+    render();
+  },
+  door:()=>{
+    doorsButton.click();
+    describePart('Doors',doorsOpen
+      ? 'The doors pivot outward on hinges near the front edge. Select Door again to close them.'
+      : 'The doors are closed. Select Door to swing them open.');
+  },
+  wheel:()=>{
+    yaw=.2;pitch=.23;zoom=1.08;
+    describePart('Wheel and tire','The tire grips the road, and the wheel supports it and turns with the axle.');
+    render();
+  },
+  light:()=>{
+    lightsButton.click();
+    describePart('Headlights',headlightsOn
+      ? 'The headlights are on. They illuminate the road ahead.'
+      : 'The headlights are off. Select Lights to switch them on.');
+  }
+};
+for(const button of hotspots) button.addEventListener('click',partActions[button.dataset.part]);
 const viewAngles={front:Math.PI/2,side:0,rear:-Math.PI/2};
 for(const button of document.querySelectorAll('[data-view]')){
   button.addEventListener('click',()=>{
