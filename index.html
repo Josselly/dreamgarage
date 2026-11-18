@@ -41,7 +41,8 @@ dialog{width:min(480px,calc(100% - 24px));max-height:96dvh;padding:14px;backgrou
 dialog::backdrop{background:#05080bcc}
 .drive-header,.drive-controls{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .drive-header h2{margin:0;font-size:20px}
-#track{height:min(49dvh,400px);margin:10px 0;background:#202a30;border-radius:8px;cursor:default;touch-action:auto}
+#track{height:min(49dvh,400px);margin:10px 0;background:#202a30;border-radius:8px;cursor:default;touch-action:none}
+.drive-score{display:flex;justify-content:space-between;gap:8px;font-size:13px;font-variant-numeric:tabular-nums;color:var(--accent)}
 #drive-status{margin:5px 0 10px;font-size:14px;color:var(--muted)}
 @media(max-width:570px){main{padding-top:17px}.controls{gap:12px;padding:12px}.camera,.features{width:100%}.hint{left:12px}canvas{height:355px}}
 </style>
@@ -101,7 +102,12 @@ dialog::backdrop{background:#05080bcc}
 <button id="drive-close" aria-label="Close test drive">✕</button>
 </div>
 <canvas id="track" width="360" height="400" aria-label="Three-lane road. Steer with the arrow keys or the buttons below."></canvas>
-<p id="drive-status" role="status">Use ← and → to avoid traffic for 20 seconds.</p>
+<div class="drive-score" aria-label="Game score">
+<span id="drive-time">20s left</span>
+<span id="drive-coins">Coins 0</span>
+<span id="drive-best">Best 0</span>
+</div>
+<p id="drive-status" role="status">Collect coins and dodge traffic for 20 seconds. Steer with arrows, buttons, or swipes.</p>
 <div class="drive-controls">
 <button id="steer-left" aria-label="Steer left">←</button>
 <button id="drive-start">Start drive</button>
@@ -429,7 +435,11 @@ const startDrive=document.getElementById('drive-start');
 const laneX=index=>80+100*index;
 const driveGoal=20;
 let lane=1, elapsed=0, nextCar=0, lastTime=0, driveFrame=0;
-let running=false, traffic=[];
+let running=false, traffic=[], coins=[];
+let coinCount=0, bestCoins=0, nextCoin=0;
+const timeLabel=document.getElementById('drive-time');
+const coinsLabel=document.getElementById('drive-coins');
+const bestLabel=document.getElementById('drive-best');
 let driverColor='#ef693c', driverShape='coupe';
 
 function drawCar(x,y,color,style){
@@ -468,6 +478,15 @@ function drawRoad(){
     }
   }
   for(const car of traffic) drawCar(laneX(car.lane),car.y,'#76899d','sedan');
+  for(const coin of coins){
+    road.fillStyle='#ffd66b';
+    road.beginPath();
+    road.arc(laneX(coin.lane),coin.y,11,0,Math.PI*2);
+    road.fill();
+    road.strokeStyle='#795524';
+    road.lineWidth=2;
+    road.stroke();
+  }
   drawCar(laneX(lane),345,driverColor,driverShape);
   road.fillStyle='#eaff8f';
   road.fillRect(33,0,294*Math.min(elapsed/driveGoal,1),4);
@@ -478,7 +497,9 @@ function endDrive(message){
   cancelAnimationFrame(driveFrame);
   startDrive.disabled=false;
   if(message){
-    driveStatus.textContent=message;
+    bestCoins=Math.max(bestCoins,coinCount);
+    bestLabel.textContent='Best '+bestCoins;
+    driveStatus.textContent=message+' Coins collected: '+coinCount+'.';
     startDrive.textContent='Play again';
     startDrive.focus();
   }
@@ -493,9 +514,28 @@ function tick(time){
     traffic.push({lane:Math.floor(Math.random()*3),y:-38});
     nextCar+=Math.max(.62,1.03-elapsed*.019);
   }
+  if(elapsed>=nextCoin && elapsed<driveGoal-1.7){
+    const trafficAtEntrance=traffic.find(car=>car.y<40);
+    const offset=1+Math.floor(Math.random()*2);
+    const coinLane=trafficAtEntrance ? (trafficAtEntrance.lane+offset)%3 : Math.floor(Math.random()*3);
+    coins.push({lane:coinLane,y:-38});
+    nextCoin+=.76;
+  }
   const speed=222+elapsed*3;
   for(const car of traffic) car.y+=speed*step;
   traffic=traffic.filter(car=>car.y<443);
+  for(const coin of coins) coin.y+=speed*step;
+  coins=coins.filter(coin=>{
+    if(coin.lane===lane && Math.abs(coin.y-345)<34){
+      coinCount++;
+      return false;
+    }
+    return coin.y<415;
+  });
+  const timeText=Math.max(0,Math.ceil(driveGoal-elapsed))+'s left';
+  const coinsText='Coins '+coinCount;
+  if(timeLabel.textContent!==timeText) timeLabel.textContent=timeText;
+  if(coinsLabel.textContent!==coinsText) coinsLabel.textContent=coinsText;
   drawRoad();
   if(traffic.some(car=>car.lane===lane && Math.abs(car.y-345)<60)){
     endDrive('You hit traffic after '+Math.floor(elapsed)+' seconds. Try again!');
@@ -511,6 +551,11 @@ function resetDrive(){
   elapsed=0;
   nextCar=0;
   traffic=[];
+  coins=[];
+  coinCount=0;
+  nextCoin=.35;
+  timeLabel.textContent=driveGoal+'s left';
+  coinsLabel.textContent='Coins 0';
   drawRoad();
 }
 
@@ -518,7 +563,7 @@ document.getElementById('drive').addEventListener('click',()=>{
   driverColor='rgb('+paint.join(',')+')';
   driverShape=document.getElementById('car-select').value;
   document.getElementById('drive-title').textContent=car.name+' test drive';
-  driveStatus.textContent='Use ← and → to avoid traffic for 20 seconds.';
+  driveStatus.textContent='Collect coins and dodge traffic for 20 seconds. Steer with arrows, buttons, or swipes.';
   startDrive.textContent='Start drive';
   resetDrive();
   game.showModal();
@@ -530,7 +575,7 @@ startDrive.addEventListener('click',()=>{
   resetDrive();
   running=true;
   startDrive.disabled=true;
-  driveStatus.textContent='Avoid traffic. Use the arrow keys or the steering buttons.';
+  driveStatus.textContent='Dodge traffic and steer into coins.';
   document.getElementById('steer-left').focus();
   lastTime=performance.now();
   driveFrame=requestAnimationFrame(tick);
@@ -543,6 +588,19 @@ function steer(direction){
 }
 document.getElementById('steer-left').addEventListener('click',()=>steer(-1));
 document.getElementById('steer-right').addEventListener('click',()=>steer(1));
+let swipeStart=null;
+track.addEventListener('pointerdown',event=>{
+  if(!running||!event.isPrimary||event.button!==0) return;
+  swipeStart=event.clientX;
+  track.setPointerCapture(event.pointerId);
+});
+track.addEventListener('pointerup',event=>{
+  if(swipeStart===null||!event.isPrimary) return;
+  const distance=event.clientX-swipeStart;
+  swipeStart=null;
+  if(Math.abs(distance)>=18) steer(Math.sign(distance));
+});
+track.addEventListener('lostpointercapture',()=>{swipeStart=null;});
 game.addEventListener('keydown',event=>{
   if(event.key==='ArrowLeft'||event.key==='ArrowRight'){
     event.preventDefault();
