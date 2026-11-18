@@ -43,6 +43,8 @@ dialog::backdrop{background:#05080bcc}
 .drive-header h2{margin:0;font-size:20px}
 #track{height:min(49dvh,400px);margin:10px 0;background:#202a30;border-radius:8px;cursor:default;touch-action:none}
 .drive-score{display:flex;justify-content:space-between;gap:8px;font-size:13px;font-variant-numeric:tabular-nums;color:var(--accent)}
+.drive-controls{justify-content:center;flex-wrap:wrap;margin-top:8px}
+.drive-controls button{touch-action:none}
 #drive-status{margin:5px 0 10px;font-size:14px;color:var(--muted)}
 @media(max-width:570px){main{padding-top:17px}.controls{gap:12px;padding:12px}.camera,.features{width:100%}.hint{left:12px}canvas{height:355px}}
 </style>
@@ -101,17 +103,17 @@ dialog::backdrop{background:#05080bcc}
 <h2 id="drive-title">Test drive</h2>
 <button id="drive-close" aria-label="Close test drive">✕</button>
 </div>
-<canvas id="track" width="360" height="400" aria-label="Three-lane road. Steer with the arrow keys or the buttons below."></canvas>
+<canvas id="track" width="360" height="400" aria-label="Free-roam driving course with collectible coins."></canvas>
 <div class="drive-score" aria-label="Game score">
-<span id="drive-time">20s left</span>
-<span id="drive-coins">Coins 0</span>
-<span id="drive-best">Best 0</span>
+<span id="drive-coins">Coins 0 / 18</span>
 </div>
-<p id="drive-status" role="status">Collect coins and dodge traffic for 20 seconds. Steer with arrows, buttons, or swipes.</p>
+<p id="drive-status" role="status">Use the arrow keys, WASD, or hold the buttons to drive and collect coins.</p>
 <div class="drive-controls">
-<button id="steer-left" aria-label="Steer left">←</button>
-<button id="drive-start">Start drive</button>
-<button id="steer-right" aria-label="Steer right">→</button>
+<button data-direction="left" aria-label="Drive left">←</button>
+<button data-direction="up" aria-label="Drive up">↑</button>
+<button data-direction="down" aria-label="Drive down">↓</button>
+<button data-direction="right" aria-label="Drive right">→</button>
+<button id="drive-reset">Reset course</button>
 </div>
 </dialog>
 <script>
@@ -431,16 +433,22 @@ const game=document.getElementById('drive-game');
 const track=document.getElementById('track');
 const road=track.getContext('2d');
 const driveStatus=document.getElementById('drive-status');
-const startDrive=document.getElementById('drive-start');
-const laneX=index=>80+100*index;
-const driveGoal=20;
-let lane=1, elapsed=0, nextCar=0, lastTime=0, driveFrame=0;
-let running=false, traffic=[], coins=[];
-let coinCount=0, bestCoins=0, nextCoin=0;
-const timeLabel=document.getElementById('drive-time');
 const coinsLabel=document.getElementById('drive-coins');
-const bestLabel=document.getElementById('drive-best');
-let driverColor='#ef693c', driverShape='coupe';
+const field={width:900,height:900};
+const coinSpots=[
+  [450,670],[450,555],[450,450],[450,335],[450,220],
+  [240,735],[160,580],[155,385],[225,225],[340,145],
+  [590,155],[720,230],[755,380],[730,560],[650,720],
+  [315,530],[580,385],[540,620]
+];
+const keyDirections={
+  ArrowLeft:'left',ArrowRight:'right',ArrowUp:'up',ArrowDown:'down',
+  a:'left',d:'right',w:'up',s:'down'
+};
+const heldKeys=new Set(), heldPointers=new Map();
+const player={x:450,y:762,angle:0};
+let driveFrame=0,lastTime=0,coins=[];
+let driverColor='#ef693c',driverShape='coupe';
 
 function drawCar(x,y,color,style){
   const height=style==='sedan'?68:style==='hatch'?55:62;
@@ -463,150 +471,124 @@ function drawCar(x,y,color,style){
   road.fillRect(x+width*.38-8,y-height*.38,8,4);
 }
 
-function drawRoad(){
-  road.fillStyle='#182127';
+
+function drawCourse(){
+  const cameraX=clamp(player.x-180,0,field.width-360);
+  const cameraY=clamp(player.y-200,0,field.height-400);
+  road.fillStyle='#23382f';
   road.fillRect(0,0,360,400);
+  road.save();
+  road.translate(-cameraX,-cameraY);
+
   road.fillStyle='#303940';
-  road.fillRect(30,0,300,400);
-  road.fillStyle='#eaff8f';
-  road.fillRect(30,0,3,400);
-  road.fillRect(327,0,3,400);
-  road.fillStyle='#a2afb8';
-  for(const divider of [130,230]){
-    for(let y=-52;y<400;y+=52){
-      road.fillRect(divider,y+(elapsed*220)%52,2,25);
-    }
-  }
-  for(const car of traffic) drawCar(laneX(car.lane),car.y,'#76899d','sedan');
+  road.beginPath();
+  road.roundRect(67,66,766,768,86);
+  road.fill();
+  road.strokeStyle='#f6de9b';
+  road.lineWidth=3;
+  road.stroke();
+
+  road.strokeStyle='#8c9da36e';
+  road.lineWidth=2;
+  road.setLineDash([15,15]);
+  road.beginPath();
+  road.roundRect(135,135,630,630,65);
+  road.moveTo(450,135);
+  road.lineTo(450,765);
+  road.moveTo(135,450);
+  road.lineTo(765,450);
+  road.stroke();
+  road.setLineDash([]);
+
   for(const coin of coins){
     road.fillStyle='#ffd66b';
     road.beginPath();
-    road.arc(laneX(coin.lane),coin.y,11,0,Math.PI*2);
+    road.arc(coin.x,coin.y,11,0,Math.PI*2);
     road.fill();
     road.strokeStyle='#795524';
     road.lineWidth=2;
     road.stroke();
   }
-  drawCar(laneX(lane),345,driverColor,driverShape);
-  road.fillStyle='#eaff8f';
-  road.fillRect(33,0,294*Math.min(elapsed/driveGoal,1),4);
-}
 
-function endDrive(message){
-  running=false;
-  cancelAnimationFrame(driveFrame);
-  startDrive.disabled=false;
-  if(message){
-    bestCoins=Math.max(bestCoins,coinCount);
-    bestLabel.textContent='Best '+bestCoins;
-    driveStatus.textContent=message+' Coins collected: '+coinCount+'.';
-    startDrive.textContent='Play again';
-    startDrive.focus();
-  }
-}
-
-function tick(time){
-  if(!running) return;
-  const step=Math.min((time-lastTime)/1000,.05);
-  lastTime=time;
-  elapsed+=step;
-  if(elapsed>=nextCar && elapsed<driveGoal-1){
-    traffic.push({lane:Math.floor(Math.random()*3),y:-38});
-    nextCar+=Math.max(.62,1.03-elapsed*.019);
-  }
-  if(elapsed>=nextCoin && elapsed<driveGoal-1.7){
-    const trafficAtEntrance=traffic.find(car=>car.y<40);
-    const offset=1+Math.floor(Math.random()*2);
-    const coinLane=trafficAtEntrance ? (trafficAtEntrance.lane+offset)%3 : Math.floor(Math.random()*3);
-    coins.push({lane:coinLane,y:-38});
-    nextCoin+=.76;
-  }
-  const speed=222+elapsed*3;
-  for(const car of traffic) car.y+=speed*step;
-  traffic=traffic.filter(car=>car.y<443);
-  for(const coin of coins) coin.y+=speed*step;
-  coins=coins.filter(coin=>{
-    if(coin.lane===lane && Math.abs(coin.y-345)<34){
-      coinCount++;
-      return false;
-    }
-    return coin.y<415;
-  });
-  const timeText=Math.max(0,Math.ceil(driveGoal-elapsed))+'s left';
-  const coinsText='Coins '+coinCount;
-  if(timeLabel.textContent!==timeText) timeLabel.textContent=timeText;
-  if(coinsLabel.textContent!==coinsText) coinsLabel.textContent=coinsText;
-  drawRoad();
-  if(traffic.some(car=>car.lane===lane && Math.abs(car.y-345)<60)){
-    endDrive('You hit traffic after '+Math.floor(elapsed)+' seconds. Try again!');
-  }else if(elapsed>=driveGoal){
-    endDrive('Test drive complete! You avoided traffic for 20 seconds.');
-  }else{
-    driveFrame=requestAnimationFrame(tick);
-  }
+  road.translate(player.x,player.y);
+  road.rotate(player.angle);
+  drawCar(0,0,driverColor,driverShape);
+  road.restore();
 }
 
 function resetDrive(){
-  lane=1;
-  elapsed=0;
-  nextCar=0;
-  traffic=[];
-  coins=[];
-  coinCount=0;
-  nextCoin=.35;
-  timeLabel.textContent=driveGoal+'s left';
-  coinsLabel.textContent='Coins 0';
-  drawRoad();
+  Object.assign(player,{x:450,y:762,angle:0});
+  coins=coinSpots.map(([x,y])=>({x,y}));
+  heldKeys.clear();
+  heldPointers.clear();
+  coinsLabel.textContent='Coins 0 / '+coinSpots.length;
+  driveStatus.textContent='Use the arrow keys, WASD, or hold the buttons to drive and collect coins.';
+  drawCourse();
+}
+
+function tick(time){
+  const step=Math.min(Math.max((time-lastTime)/1000,0),.05);
+  lastTime=time;
+  const directions=new Set([...heldKeys].map(key=>keyDirections[key]));
+  for(const direction of heldPointers.values()) directions.add(direction);
+  const dx=Number(directions.has('right'))-Number(directions.has('left'));
+  const dy=Number(directions.has('down'))-Number(directions.has('up'));
+  if(dx||dy){
+    const distance=210*step/Math.hypot(dx,dy);
+    player.x=clamp(player.x+dx*distance,38,field.width-38);
+    player.y=clamp(player.y+dy*distance,38,field.height-38);
+    player.angle=Math.atan2(dx,-dy);
+    const remaining=coins.filter(coin=>Math.hypot(player.x-coin.x,player.y-coin.y)>=31);
+    if(remaining.length!==coins.length){
+      coins=remaining;
+      coinsLabel.textContent='Coins '+(coinSpots.length-coins.length)+' / '+coinSpots.length;
+      if(!coins.length) driveStatus.textContent='You collected every coin! Keep driving or reset the course.';
+    }
+    drawCourse();
+  }
+  driveFrame=requestAnimationFrame(tick);
 }
 
 document.getElementById('drive').addEventListener('click',()=>{
   driverColor='rgb('+paint.join(',')+')';
   driverShape=document.getElementById('car-select').value;
   document.getElementById('drive-title').textContent=car.name+' test drive';
-  driveStatus.textContent='Collect coins and dodge traffic for 20 seconds. Steer with arrows, buttons, or swipes.';
-  startDrive.textContent='Start drive';
   resetDrive();
   game.showModal();
-  startDrive.focus();
-});
-document.getElementById('drive-close').addEventListener('click',()=>game.close());
-game.addEventListener('close',()=>endDrive());
-startDrive.addEventListener('click',()=>{
-  resetDrive();
-  running=true;
-  startDrive.disabled=true;
-  driveStatus.textContent='Dodge traffic and steer into coins.';
-  document.getElementById('steer-left').focus();
   lastTime=performance.now();
   driveFrame=requestAnimationFrame(tick);
 });
-function steer(direction){
-  if(running){
-    lane=clamp(lane+direction,0,2);
-    drawRoad();
+document.getElementById('drive-close').addEventListener('click',()=>game.close());
+document.getElementById('drive-reset').addEventListener('click',resetDrive);
+game.addEventListener('close',()=>{
+  cancelAnimationFrame(driveFrame);
+  heldKeys.clear();
+  heldPointers.clear();
+});
+game.addEventListener('keydown',event=>{
+  const key=event.key.length===1?event.key.toLowerCase():event.key;
+  if(Object.hasOwn(keyDirections,key)){
+    event.preventDefault();
+    heldKeys.add(key);
+  }
+});
+window.addEventListener('keyup',event=>{
+  heldKeys.delete(event.key.length===1?event.key.toLowerCase():event.key);
+});
+window.addEventListener('blur',()=>{
+  heldKeys.clear();
+  heldPointers.clear();
+});
+for(const button of document.querySelectorAll('[data-direction]')){
+  button.addEventListener('pointerdown',event=>{
+    if(event.button!==0) return;
+    button.setPointerCapture(event.pointerId);
+    heldPointers.set(event.pointerId,button.dataset.direction);
+  });
+  for(const type of ['pointerup','pointercancel','lostpointercapture']){
+    button.addEventListener(type,event=>heldPointers.delete(event.pointerId));
   }
 }
-document.getElementById('steer-left').addEventListener('click',()=>steer(-1));
-document.getElementById('steer-right').addEventListener('click',()=>steer(1));
-let swipeStart=null;
-track.addEventListener('pointerdown',event=>{
-  if(!running||!event.isPrimary||event.button!==0) return;
-  swipeStart=event.clientX;
-  track.setPointerCapture(event.pointerId);
-});
-track.addEventListener('pointerup',event=>{
-  if(swipeStart===null||!event.isPrimary) return;
-  const distance=event.clientX-swipeStart;
-  swipeStart=null;
-  if(Math.abs(distance)>=18) steer(Math.sign(distance));
-});
-track.addEventListener('lostpointercapture',()=>{swipeStart=null;});
-game.addEventListener('keydown',event=>{
-  if(event.key==='ArrowLeft'||event.key==='ArrowRight'){
-    event.preventDefault();
-    steer(event.key==='ArrowLeft'?-1:1);
-  }
-});
 </script>
 </body>
 </html>
